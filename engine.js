@@ -5,7 +5,7 @@
  *  职责边界（见 docs/adr/0001）：代码只枚举、模拟、词化，不估值。
  *  - 引擎：棋盘、7-bag（可注入种子）、旋转、消行、计分
  *  - 评估计算：落点枚举、局面统计、词化（数字转词 + 显著事实）
- *  - Jev 问题构造：state / questions（priorities、strategy、health、fits）
+ *  - Jev 问题构造：单请求模式（默认，v3）+ 判断链两跳（实验，strategy → placement）
  *
  *  heuristicScore 只允许用于对照玩家与离线劣招标注，永不进入决策路径。
  * ================================================================ */
@@ -383,23 +383,25 @@ export const HEALTH_LEVELS = [
   "Rough: several holes or a jagged surface, room is shrinking",
   "Critical: stack near the top, the game may be lost within a few pieces",
 ];
-export function buildState(engine) {
+export function buildState(engine, opts = {}) {
   const stats = gridStats(engine.grid);
-  return {
-    game: {
-      rules: "Standard Tetris. Board is 10 columns wide and 20 rows tall. Rows fill left to right; a full row disappears. The game is lost when the stack reaches the top.",
-      board_rows_top_to_bottom: engine.grid.map(r => r.join("")),
-      legend: "# is a filled cell, . is an empty cell. The first row is the top of the board.",
-      column_heights_left_to_right: stats.heights,
-      stack_height: describeHeight(stats.maxHeight),
-      holes_in_stack: describeHoles(stats.holes),
-      surface: describeSurface(stats.bumpiness),
-      current_piece: engine.cur.type,
-      next_piece: engine.nextType,
-      lines_cleared_so_far: engine.lines,
-    },
+  const game = {
+    rules: "Standard Tetris. Board is 10 columns wide and 20 rows tall. Rows fill left to right; a full row disappears. The game is lost when the stack reaches the top.",
+    board_rows_top_to_bottom: engine.grid.map(r => r.join("")),
+    legend: "# is a filled cell, . is an empty cell. The first row is the top of the board.",
+    column_heights_left_to_right: stats.heights,
+    stack_height: describeHeight(stats.maxHeight),
+    holes_in_stack: describeHoles(stats.holes),
+    surface: describeSurface(stats.bumpiness),
+    current_piece: engine.cur.type,
+    next_piece: engine.nextType,
+    lines_cleared_so_far: engine.lines,
   };
+  // 判断链第二跳专用：Jev 自己的 strategy 回答原样喂回（代码只传话，不改写）
+  if (opts.strategy) game.chosen_strategy = opts.strategy;
+  return { game };
 }
+// 单请求模式（v3 词化，当前默认）：placement 主问题 + strategy/health/fits 投机问题
 export function buildQuestions(placements) {
   const criteria = describePlacements(placements); // 含显著事实，日志记录同一版本
   return {
@@ -428,6 +430,47 @@ export function buildQuestions(placements) {
         true: "A clean spot is easy to see.",
         false: "The next piece will be awkward to place.",
       },
+    },
+  };
+}
+// 判断链第一跳：strategy 问题（board_health / next_piece_fits 为投机问题随附，
+// 只进日志供诊断，不消费——P3 校准差，见 docs/jev-v2-failure-patterns.md）。
+// 实验模式（路线图第 5 步）：2026-09-23 验证为回退（v4 均值 50.5 行 vs v3 71.5），
+// 机制：喂回的策略文本与 priorities/显著事实竞争权重，P1/P2 回升。保留供后续实验。
+export function buildStrategyQuestions() {
+  return {
+    strategy: {
+      type: "choice",
+      instructions: "Looking at `game`, which strategy fits the current situation best for the next few pieces?",
+      criteria: STRATEGY_OPTIONS,
+    },
+    board_health: {
+      type: "score",
+      instructions: "How healthy is the stack in `game` for a Tetris player who wants to keep playing for a long time?",
+      criteria: HEALTH_LEVELS,
+    },
+    next_piece_fits: {
+      type: "noul",
+      instructions: "Given `game.column_heights_left_to_right` and `game.surface`, is there an obvious clean spot for `game.next_piece` after this move, without creating holes?",
+      criteria: {
+        true: "A clean spot is easy to see.",
+        false: "The next piece will be awkward to place.",
+      },
+    },
+  };
+}
+// 判断链第二跳：placement 问题。state 中已带 game.chosen_strategy（Jev 自己的
+// 第一跳回答，代码只传话——ADR 0001 边界内）。
+export function buildPlacementQuestions(placements) {
+  const criteria = describePlacements(placements); // 含显著事实，日志记录同一版本
+  return {
+    placement: {
+      type: "choice",
+      instructions: {
+        question: "Which placement of `game.current_piece` should the player choose? Each option describes the board after that placement. `game.chosen_strategy` is the strategy you just chose for the next few pieces — pick the placement that best carries it out.",
+        priorities: PLACEMENT_PRIORITIES,
+      },
+      criteria,
     },
   };
 }

@@ -12,7 +12,9 @@
  *    node eval/harness.mjs --player heuristic [--games 100] [--seed-start 0] [--max-pieces 500]
  *    node eval/harness.mjs --player random --games 100
  *    TYPESAFE_API_KEY=sk-... node eval/harness.mjs --player jev --games 20 \
- *        [--model jev-latest] [--log eval/runs/jev-v2.jsonl]
+ *        [--model jev-latest] [--log eval/runs/jev-v2.jsonl] [--chain 1]
+ *
+ *  --chain 1 开启判断链实验（先 strategy 后落点两跳；2026-09-23 验证为回退，默认关闭）。
  *
  *  --log 记录每步决策（state、全部落点及其启发式分、Jev 答案），
  *  供离线劣招标注与失误诊断使用（诊断脚本见 eval/diagnose.mjs）。
@@ -21,11 +23,11 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   Engine, mulberry32, enumeratePlacements, gridStats,
-  buildState, buildQuestions,
+  buildState, buildQuestions, buildStrategyQuestions, buildPlacementQuestions, STRATEGY_OPTIONS,
 } from "../engine.js";
 
 /* ---------- 参数 ---------- */
-const args = { player: "heuristic", games: 100, "seed-start": 0, "max-pieces": 500, model: "jev-latest", log: "" };
+const args = { player: "heuristic", games: 100, "seed-start": 0, "max-pieces": 500, model: "jev-latest", log: "", chain: "" };
 for (let i = 2; i < process.argv.length; i += 2) {
   const k = process.argv[i].replace(/^--/, "");
   if (!(k in args)) { console.error(`未知参数 --${k}`); process.exit(1); }
@@ -41,7 +43,7 @@ function heuristicDecide(engine, placements) {
 function randomDecideFactory(rng) {
   return (engine, placements) => placements[Math.floor(rng() * placements.length)];
 }
-// Jev 玩家：与页面同一套 state / questions，一次 Choice 选落点
+// Jev API 调用（直连 api.typesafe.ai，429/529 与网络错误指数退避重试）
 async function askJev(body, key) {
   const maxRetry = 6;
   for (let attempt = 0; ; attempt++) {
@@ -75,27 +77,44 @@ async function askJev(body, key) {
     return resp.json();
   }
 }
-function jevDecideFactory(key, model, log) {
+// Jev 玩家：默认单请求模式（v3 词化，当前最强配置）；
+// --chain 1 开启判断链实验（路线图第 5 步）：第一跳先问 strategy
+// （board_health / next_piece_fits 作投机问题随附，仅进日志），
+// 把 Jev 自己的回答原样喂回第二跳 state 的 game.chosen_strategy，再问落点。
+// 代码只传话，不改写回答 —— ADR 0001 边界内。
+// 注：2026-09-23 验证判断链为回退（v4 均值 50.5 行 vs v3 71.5），默认关闭。
+function jevDecideFactory(key, model, log, chain) {
   return async (engine, placements, ctx) => {
-    const body = { state: buildState(engine), model, questions: buildQuestions(placements) };
-    const t0 = performance.now();
-    const data = await askJev(body, key);
-    const ms = Math.round(performance.now() - t0);
-    const a = data.answers.placement;
+    // 第一跳（仅判断链模式）：strategy
+    let d1 = null, msStrategy = 0, strategy;
+    if (chain) {
+      const t0 = performance.now();
+      d1 = await askJev({ state: buildState(engine), model, questions: buildStrategyQuestions() }, key);
+      msStrategy = Math.round(performance.now() - t0);
+      strategy = d1.answers.strategy?.choice;
+    }
+    // 第二跳（判断链）/ 唯一一跳（默认）：placement
+    const state = buildState(engine, { strategy: strategy ? `${strategy}: ${STRATEGY_OPTIONS[strategy]}` : undefined });
+    const questions = chain ? buildPlacementQuestions(placements) : buildQuestions(placements);
+    const t1 = performance.now();
+    const d2 = await askJev({ state, model, questions }, key);
+    const msPlacement = Math.round(performance.now() - t1);
+    const a = d2.answers.placement;
     const byId = new Map(placements.map(p => [p.id, p]));
     const chosen = byId.get(a.choice) || placements[0];
     const hBest = placements.reduce((b, p) => (p.heuristic > b.heuristic ? p : b), placements[0]);
     log?.write(JSON.stringify({
-      ...ctx, ms,
-      tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+      ...ctx, ms: msStrategy + msPlacement, ...(chain ? { ms_strategy: msStrategy, ms_placement: msPlacement } : {}),
+      tokens: (d1 ? (d1.usage?.input_tokens || 0) + (d1.usage?.output_tokens || 0) : 0)
+            + ((d2.usage?.input_tokens || 0) + (d2.usage?.output_tokens || 0)),
       piece: engine.cur.type, next: engine.nextType,
-      state: body.state.game,
-      candidates: placements.map(p => ({ id: p.id, rot: p.rot, x: p.x, heuristic: +p.heuristic.toFixed(2), desc: body.questions.placement.criteria[p.id] })),
+      state: state.game,
+      candidates: placements.map(p => ({ id: p.id, rot: p.rot, x: p.x, heuristic: +p.heuristic.toFixed(2), desc: questions.placement.criteria[p.id] })),
       answers: {
         placement: { choice: a.choice, confidence: a.confidence, probabilities: a.probabilities },
-        strategy: data.answers.strategy?.choice,
-        board_health: data.answers.board_health?.score,
-        next_piece_fits: data.answers.next_piece_fits?.noul,
+        strategy: chain ? strategy : d2.answers.strategy?.choice,
+        board_health: (d1 || d2).answers.board_health?.score,
+        next_piece_fits: (d1 || d2).answers.next_piece_fits?.noul,
       },
       chosen: chosen.id, heuristic_best: hBest.id, agree: chosen.id === hBest.id,
     }) + "\n");
@@ -150,7 +169,7 @@ else if (args.player === "random") { const rng = mulberry32(0xC0FFEE); decide = 
 else if (args.player === "jev") {
   const key = process.env.TYPESAFE_API_KEY;
   if (!key) { console.error("需要 TYPESAFE_API_KEY 环境变量"); process.exit(1); }
-  decide = jevDecideFactory(key, args.model, log);
+  decide = jevDecideFactory(key, args.model, log, !!args.chain);
 } else { console.error(`未知玩家 ${args.player}`); process.exit(1); }
 
 const results = [];
