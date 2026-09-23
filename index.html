@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tetris × Jev — AI 自己玩的俄罗斯方块</title>
+<style>
+  :root {
+    --bg: #f5f4ef; --ink: #141414; --line: #d8d5cc; --red: #e63329;
+    --muted: #6f6c64; --panel: #ffffff;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Inter, -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.5;
+    padding: 0 24px 40px;
+  }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 22px 0 14px; border-bottom: 3px solid var(--ink); margin-bottom: 20px; }
+  header h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+  header h1 em { font-style: normal; color: var(--red); }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .badge { margin-left: auto; font-size: 12px; font-weight: 700; padding: 4px 12px; border: 1.5px solid var(--ink); border-radius: 999px; text-transform: uppercase; letter-spacing: 1px; }
+  header .badge.on { background: var(--ink); color: #fff; }
+  header .badge.err { background: var(--red); border-color: var(--red); color: #fff; }
+  .layout { display: flex; gap: 28px; align-items: flex-start; max-width: 1180px; margin: 0 auto; }
+
+  .board-col { flex: 0 0 auto; display: flex; gap: 16px; }
+  .board-wrap { position: relative; border: 3px solid var(--ink); background: #fbfaf6; }
+  canvas { display: block; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(245,244,239,0.92); text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay .big { font-size: 24px; font-weight: 800; letter-spacing: 1px; }
+  .overlay .hint { color: var(--muted); font-size: 13px; max-width: 220px; }
+  .overlay button { font: inherit; font-weight: 700; padding: 8px 22px; background: var(--ink); color: #fff; border: none; cursor: pointer; }
+  .overlay button:hover { background: var(--red); }
+  .side { display: flex; flex-direction: column; gap: 12px; width: 128px; }
+  .side .stat { border: 2px solid var(--ink); padding: 8px 10px; background: var(--panel); }
+  .side .stat .label { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: var(--muted); }
+  .side .stat .value { font-family: var(--mono); font-size: 20px; font-weight: 700; }
+  .side .next-box { border: 2px solid var(--ink); padding: 8px; background: var(--panel); }
+  .side .next-box .label { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 6px; }
+
+  .panel { flex: 1 1 auto; min-width: 400px; max-width: 640px; display: flex; flex-direction: column; gap: 14px; }
+  .block { background: var(--panel); border: 2px solid var(--ink); }
+  .block > h2 { font-size: 12px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; padding: 8px 12px; border-bottom: 2px solid var(--ink); background: var(--ink); color: #fff; }
+  .block .body { padding: 12px; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+  .keys kbd { font-family: var(--mono); font-size: 11px; background: #f0eee7; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; white-space: nowrap; justify-self: start; }
+  .keys .desc { color: var(--muted); }
+
+  .form-grid { display: grid; grid-template-columns: 92px 1fr; gap: 8px 10px; align-items: center; }
+  .form-grid label { font-size: 12px; font-weight: 700; color: var(--muted); }
+  .form-grid input[type="text"], .form-grid input[type="password"] { font: 13px var(--mono); width: 100%; padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 4px; background: #fbfaf6; color: var(--ink); }
+  .form-grid input:focus { outline: none; border-color: var(--ink); }
+  .mode-row { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 13px; }
+  .mode-row .mode-title { font-size: 12px; font-weight: 700; color: var(--muted); }
+  .mode-row label { display: flex; gap: 6px; align-items: baseline; cursor: pointer; }
+  .mode-row label b { font-weight: 700; }
+  .mode-row small { color: var(--muted); }
+  .row-btns { display: flex; gap: 10px; margin-top: 12px; }
+  button.primary, button.ghost { font: inherit; font-weight: 700; padding: 8px 20px; cursor: pointer; border-radius: 4px; }
+  button.primary { background: var(--red); color: #fff; border: 2px solid var(--red); }
+  button.primary:hover { background: #c2231b; }
+  button.primary:disabled { background: var(--line); border-color: var(--line); cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--ink); border: 2px solid var(--ink); }
+  button.ghost:hover { background: var(--ink); color: #fff; }
+  .errbox { display: none; margin-top: 10px; padding: 8px 10px; font-size: 12px; font-family: var(--mono); background: #fdecea; border: 1.5px solid var(--red); color: #8f1d15; border-radius: 4px; word-break: break-all; }
+  .errbox.show { display: block; }
+
+  .ai-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+  .ai-stats .chip { border: 1.5px solid var(--line); border-radius: 4px; padding: 6px 10px; background: #fbfaf6; }
+  .ai-stats .chip .k { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--muted); }
+  .ai-stats .chip .v { font-family: var(--mono); font-size: 16px; font-weight: 700; }
+
+  .log { max-height: 320px; overflow-y: auto; font-family: var(--mono); font-size: 11.5px; }
+  .log .entry { padding: 8px 12px; border-bottom: 1px solid #eeece5; }
+  .log .entry .top { display: flex; gap: 10px; align-items: baseline; }
+  .log .entry .no { color: var(--muted); }
+  .log .entry .act { font-weight: 700; color: var(--red); }
+  .log .entry .meta { margin-left: auto; color: var(--muted); }
+  .log .entry .sub { color: var(--muted); margin-top: 2px; font-size: 11px; }
+  .log .bars { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; }
+  .log .bar { display: flex; align-items: center; gap: 6px; }
+  .log .bar .name { width: 110px; color: var(--muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .log .bar .track { flex: 1; height: 7px; background: #f0eee7; border-radius: 2px; overflow: hidden; }
+  .log .bar .fill { height: 100%; background: var(--ink); }
+  .log .bar .fill.top { background: var(--red); }
+  .log .bar .pct { width: 34px; color: var(--muted); }
+  .log .agree { color: #2c7a3f; font-weight: 700; }
+  .log .disagree { color: #b06a00; }
+  .log .empty { color: var(--muted); padding: 14px 12px; }
+
+  details.api { background: var(--panel); border: 2px solid var(--ink); }
+  details.api summary { cursor: pointer; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; padding: 9px 12px; background: var(--ink); color: #fff; }
+  details.api .body { padding: 12px; font-size: 12.5px; }
+  details.api code { font-family: var(--mono); font-size: 11.5px; background: #f0eee7; padding: 1px 5px; border-radius: 3px; }
+  details.api pre { font-family: var(--mono); font-size: 11px; line-height: 1.55; background: #141414; color: #e8e6df; padding: 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
+  details.api table { border-collapse: collapse; width: 100%; margin: 6px 0; }
+  details.api th, details.api td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; font-size: 12px; }
+  details.api th { background: #f0eee7; }
+  footer { max-width: 1180px; margin: 26px auto 0; color: var(--muted); font-size: 12px; border-top: 1.5px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>TETRIS <em>×</em> JEV</h1>
+  <span class="sub">AI 能自己玩的俄罗斯方块 · TypeSafe Jev 驱动</span>
+  <span class="badge" id="badge">手动</span>
+</header>
+
+<div class="layout">
+  <!-- ============ 游戏区 ============ -->
+  <div class="board-col">
+    <div class="board-wrap">
+      <canvas id="board" width="260" height="520"></canvas>
+      <div class="overlay" id="overlay">
+        <div class="big" id="overlayTitle">TETRIS</div>
+        <div class="hint" id="overlayHint">按任意方向键开始 · 或让 Jev 替你玩</div>
+        <button id="overlayBtn">开始游戏</button>
+      </div>
+    </div>
+    <div class="side">
+      <div class="next-box">
+        <div class="label">NEXT</div>
+        <canvas id="next" width="104" height="104"></canvas>
+      </div>
+      <div class="stat"><div class="label">SCORE</div><div class="value" id="score">0</div></div>
+      <div class="stat"><div class="label">LINES</div><div class="value" id="lines">0</div></div>
+      <div class="stat"><div class="label">LEVEL</div><div class="value" id="level">1</div></div>
+    </div>
+  </div>
+
+  <!-- ============ 面板 ============ -->
+  <div class="panel">
+
+    <div class="block">
+      <h2>Jev AI 玩家</h2>
+      <div class="body">
+        <div class="form-grid">
+          <label for="apiKey">API Key</label>
+          <input type="password" id="apiKey" placeholder="sk-... （存 localStorage）">
+          <label for="model">模型</label>
+          <input type="text" id="model" value="jev-latest">
+          <label for="baseUrl">API 地址</label>
+          <input type="text" id="baseUrl" value="http://localhost:8787">
+          <label for="interval">动作间隔</label>
+          <input type="text" id="interval" value="120">
+        </div>
+        <div class="mode-row">
+          <span class="mode-title">AI 决策模式</span>
+          <label><input type="radio" name="aimode" value="placement" checked>
+            <span><b>落点决策</b>（每方块一次调用）<small>代码枚举全部合法落点并模拟结果，Jev 从中选择 —— 参考验证过的 jev-tetris 设计</small></span></label>
+          <label><input type="radio" name="aimode" value="step">
+            <span><b>逐步动作</b>（每步一次调用）<small>实验对比用：Jev 逐步指挥 left/right/rotate/drop，概率通常较分散</small></span></label>
+        </div>
+        <div class="row-btns">
+          <button class="primary" id="aiStart">▶ 启动 Jev 玩家</button>
+          <button class="ghost" id="aiStop" disabled>■ 停止</button>
+        </div>
+        <div class="errbox" id="errbox"></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>运行统计</h2>
+      <div class="body ai-stats">
+        <div class="chip"><div class="k">决策次数</div><div class="v" id="stDecisions">0</div></div>
+        <div class="chip"><div class="k">Token 用量</div><div class="v" id="stTokens">0</div></div>
+        <div class="chip"><div class="k">平均耗时</div><div class="v" id="stLatency">–</div></div>
+        <div class="chip"><div class="k">与启发式一致</div><div class="v" id="stAgree">–</div></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>Jev 决策日志</h2>
+      <div class="log" id="log"><div class="empty">启动 Jev 玩家后，这里显示每个方块的落点决策：候选概率分布、策略判断、棋盘健康度、与经典启发式的对照。</div></div>
+    </div>
+
+    <div class="block">
+      <h2>手动操作</h2>
+      <div class="body">
+        <div class="keys">
+          <kbd>←</kbd><span class="desc">左移</span>
+          <kbd>→</kbd><span class="desc">右移</span>
+          <kbd>↑</kbd><span class="desc">顺时针旋转</span>
+          <kbd>Z</kbd><span class="desc">逆时针旋转</span>
+          <kbd>↓</kbd><span class="desc">软降（+1 分/格）</span>
+          <kbd>空格</kbd><span class="desc">硬降锁定（+2 分/格）</span>
+          <kbd>P</kbd><span class="desc">暂停 / 继续</span>
+          <kbd>R</kbd><span class="desc">重新开始</span>
+        </div>
+      </div>
+    </div>
+
+    <details class="api">
+      <summary>AI 接口文档 — window.TetrisAPI</summary>
+      <div class="body">
+        <p>引擎与渲染分离，外部智能体（Playwright / Puppeteer / harness 插件）可直接驱动：</p>
+        <table>
+          <tr><th>方法</th><th>说明</th></tr>
+          <tr><td><code>getState()</code></td><td>结构化状态：棋盘矩阵、当前方块、next、分数等</td></tr>
+          <tr><td><code>getStateText()</code></td><td>对 LLM 友好的文本序列化</td></tr>
+          <tr><td><code>getPlacements()</code></td><td>当前方块的全部合法落点及文字化结果描述（可直接作为 Choice criteria）</td></tr>
+          <tr><td><code>executePlacement(p)</code></td><td>把方块旋转/平移到落点 <code>{rot, x}</code> 并硬降锁定</td></tr>
+          <tr><td><code>applyAction(a)</code></td><td>执行 <code>left / right / rotate / rotate_ccw / soft_drop / hard_drop</code></td></tr>
+          <tr><td><code>onEvent(cb)</code></td><td>订阅 <code>lock</code> / <code>gameover</code> / <code>lineclear</code></td></tr>
+          <tr><td><code>setGravity(b)</code></td><td>开关重力（AI 模式建议关闭）</td></tr>
+          <tr><td><code>reset()</code> / <code>start()</code></td><td>重开 / 开始</td></tr>
+        </table>
+        <pre>// Playwright 外部驱动示例
+const page = await browser.newPage();
+await page.goto('file:///path/to/index.html');
+await page.evaluate(() => TetrisAPI.start());
+while (!(await page.evaluate(() => TetrisAPI.getState().gameOver))) {
+  const placements = await page.evaluate(() => TetrisAPI.getPlacements());
+  const act = await myAgent.decide(placements);   // 你的 Jev/LLM 决策
+  await page.evaluate(p => TetrisAPI.executePlacement(p), act);
+}</pre>
+      </div>
+    </details>
+
+  </div>
+</div>
+
+<footer>
+  设计参考 trungdq88/jev-tetris（Jev 官方生态验证过的玩法）：代码枚举全部合法落点并模拟结果，把数字转成文字（Jev 读文本强于算术），一个请求并行携带 placement Choice + strategy/board_health/next_piece_fits 投机问题。官方 API 不允许浏览器直连（CORS 白名单），先运行 <code>node jev-proxy.mjs 8787</code>。
+</footer>
+
+<script>
+"use strict";
+/* ================================================================
+ *  Tetris × Jev v2 —— 引擎 / 渲染 / 输入 / Jev AI 玩家 / 外部接口
+ *  AI 设计：代码枚举合法落点 + 模拟结果（文字化），Jev 每方块一次
+ *  Choice 选落点（投机 fan-out：strategy / board_health / next_piece_fits）
+ * ================================================================ */
+
+const COLS = 10, ROWS = 20, CELL = 26;
+
+/* ---------- 方块定义 ---------- */
+const COLORS = {
+  I: "#31b8c9", O: "#e0a91f", T: "#9b4fc9", S: "#54a63c",
+  Z: "#d93a35", J: "#3358c9", L: "#dd7c26",
+};
+const BASE = {
+  I: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+  O: [[1,1],[1,1]],
+  T: [[0,1,0],[1,1,1],[0,0,0]],
+  S: [[0,1,1],[1,1,0],[0,0,0]],
+  Z: [[1,1,0],[0,1,1],[0,0,0]],
+  J: [[1,0,0],[1,1,1],[0,0,0]],
+  L: [[0,0,1],[1,1,1],[0,0,0]],
+};
+const SHAPES = {};
+for (const t of Object.keys(BASE)) {
+  SHAPES[t] = [];
+  let m = BASE[t];
+  for (let r = 0; r < 4; r++) {
+    SHAPES[t].push(m);
+    m = m[0].map((_, i) => m.map(row => row[i]).reverse());
+  }
+}
+const KICKS = [0, -1, 1, -2, 2];
+const LINE_SCORES = [0, 100, 300, 500, 800];
+
+/* ---------- 引擎（纯逻辑，无 DOM） ---------- */
+class Engine {
+  constructor() { this.gravityOn = true; this.listeners = {}; this.reset(); }
+  on(evt, cb) { (this.listeners[evt] ||= []).push(cb); }
+  _emit(evt, data) { (this.listeners[evt] || []).forEach(cb => { try { cb(data); } catch {} }); }
+  reset() {
+    this.grid = Array.from({ length: ROWS }, () => Array(COLS).fill("."));
+    this.score = 0; this.lines = 0; this.level = 1;
+    this.over = false; this.started = false; this.paused = false;
+    this.bag = [];
+    this.cur = null; this.nextType = this._draw();
+    this._spawn();
+  }
+  _draw() {
+    if (!this.bag.length) {
+      this.bag = ["I","O","T","S","Z","J","L"];
+      for (let i = this.bag.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [this.bag[i], this.bag[j]] = [this.bag[j], this.bag[i]];
+      }
+    }
+    return this.bag.pop();
+  }
+  _spawn() {
+    const type = this.nextType; this.nextType = this._draw();
+    const m = SHAPES[type][0];
+    this.cur = { type, rot: 0, x: Math.floor((COLS - m[0].length) / 2), y: type === "I" ? -1 : 0 };
+    if (this._collides(m, this.cur.x, this.cur.y)) {
+      this.over = true; this._emit("gameover", { score: this.score });
+    }
+  }
+  _collides(m, px, py) {
+    for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++) {
+      if (!m[y][x]) continue;
+      const gx = px + x, gy = py + y;
+      if (gx < 0 || gx >= COLS || gy >= ROWS) return true;
+      if (gy >= 0 && this.grid[gy][gx] !== ".") return true;
+    }
+    return false;
+  }
+  move(dx) {
+    if (!this.cur || this.over) return { ok: false, moved: false };
+    const m = SHAPES[this.cur.type][this.cur.rot];
+    if (this._collides(m, this.cur.x + dx, this.cur.y)) return { ok: true, moved: false };
+    this.cur.x += dx;
+    return { ok: true, moved: true };
+  }
+  rotate(dir = 1) {
+    if (!this.cur || this.over) return { ok: false, moved: false };
+    if (this.cur.type === "O") return { ok: true, moved: true };
+    const nr = (this.cur.rot + dir + 4) % 4;
+    const m = SHAPES[this.cur.type][nr];
+    let x = -1;
+    for (const d of KICKS) if (!this._collides(m, this.cur.x + d, this.cur.y)) { x = this.cur.x + d; break; }
+    if (x < 0) return { ok: true, moved: false };
+    this.cur.x = x; this.cur.rot = nr;
+    return { ok: true, moved: true };
+  }
+  softDrop() {
+    if (!this.cur || this.over) return { ok: false, moved: false };
+    const m = SHAPES[this.cur.type][this.cur.rot];
+    if (!this._collides(m, this.cur.x, this.cur.y + 1)) { this.cur.y++; this.score += 1; return { ok: true, moved: true }; }
+    return this._lock();
+  }
+  hardDrop() {
+    if (!this.cur || this.over) return { ok: false, moved: false };
+    const m = SHAPES[this.cur.type][this.cur.rot];
+    let dist = 0;
+    while (!this._collides(m, this.cur.x, this.cur.y + 1)) { this.cur.y++; dist++; }
+    this.score += dist * 2;
+    return this._lock();
+  }
+  ghostY() {
+    if (!this.cur) return 0;
+    const m = SHAPES[this.cur.type][this.cur.rot];
+    let y = this.cur.y;
+    while (!this._collides(m, this.cur.x, y + 1)) y++;
+    return y;
+  }
+  _lock() {
+    const m = SHAPES[this.cur.type][this.cur.rot];
+    for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++) {
+      if (m[y][x]) {
+        const gy = this.cur.y + y, gx = this.cur.x + x;
+        if (gy >= 0) this.grid[gy][gx] = this.cur.type;
+      }
+    }
+    let cleared = 0;
+    for (let y = ROWS - 1; y >= 0; y--) {
+      if (this.grid[y].every(c => c !== ".")) {
+        this.grid.splice(y, 1);
+        this.grid.unshift(Array(COLS).fill("."));
+        cleared++; y++;
+      }
+    }
+    if (cleared) {
+      this.score += LINE_SCORES[cleared] * this.level;
+      this.lines += cleared;
+      this.level = Math.floor(this.lines / 10) + 1;
+      this._emit("lineclear", { cleared });
+    }
+    this._spawn();
+    const r = { ok: true, moved: true, locked: true, cleared };
+    this._emit("lock", r);
+    return r;
+  }
+  gravityTick() {
+    if (!this.cur || this.over) return;
+    const m = SHAPES[this.cur.type][this.cur.rot];
+    if (!this._collides(m, this.cur.x, this.cur.y + 1)) this.cur.y++;
+    else this._lock();
+  }
+  start() { this.started = true; }
+  setGravity(on) { this.gravityOn = on; }
+  applyAction(action) {
+    if (this.over) return { ok: false, gameOver: true };
+    if (!this.started) this.start();
+    let r;
+    switch (action) {
+      case "left":       r = this.move(-1); break;
+      case "right":      r = this.move(1);  break;
+      case "rotate":     r = this.rotate(1);  break;
+      case "rotate_ccw": r = this.rotate(-1); break;
+      case "soft_drop":  r = this.softDrop(); break;
+      case "hard_drop":  r = this.hardDrop(); break;
+      default: return { ok: false, error: "unknown action: " + action };
+    }
+    return { ...r, gameOver: this.over };
+  }
+  getState() {
+    return {
+      cols: COLS, rows: ROWS,
+      grid: this.grid.map(r => r.join("")),
+      current: this.cur ? { type: this.cur.type, rotation: this.cur.rot, col: this.cur.x, row: this.cur.y } : null,
+      next: this.nextType,
+      score: this.score, lines: this.lines, level: this.level,
+      gameOver: this.over, paused: this.paused,
+    };
+  }
+  getStateText() {
+    const L = [];
+    L.push(`Board ${COLS} columns x ${ROWS} rows (row 0 = top). '.' = empty; letters = frozen blocks.`);
+    this.grid.forEach((row, i) => L.push(`row${String(i).padStart(2, "0")}: ${row.join("")}`));
+    const c = this.cur;
+    L.push("");
+    L.push(`Current piece: ${c.type}, rotation ${c.rot}, top-left at column ${c.x}, row ${c.y}. Four rotations (bounding boxes, '#' = cells):`);
+    SHAPES[c.type].forEach((m, r) => { L.push(`rot${r}:`); m.forEach(row => L.push("  " + row.map(v => v ? "#" : ".").join(""))); });
+    L.push(`Next piece: ${this.nextType}`);
+    L.push(`Score: ${this.score}, Lines cleared: ${this.lines}, Level: ${this.level}`);
+    return L.join("\n");
+  }
+}
+
+/* ================================================================
+ *  落点枚举 + 模拟评估（纯函数，代码负责一切确定性计算）
+ *  设计参考 trungdq88/jev-tetris public/tetris.js
+ * ================================================================ */
+function collidesGrid(grid, m, px, py) {
+  for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++) {
+    if (!m[y][x]) continue;
+    const gx = px + x, gy = py + y;
+    if (gx < 0 || gx >= COLS || gy >= ROWS) return true;
+    if (gy >= 0 && grid[gy][gx] !== ".") return true;
+  }
+  return false;
+}
+function gridStats(grid) {
+  const heights = new Array(COLS).fill(0);
+  for (let x = 0; x < COLS; x++)
+    for (let y = 0; y < ROWS; y++) if (grid[y][x] !== ".") { heights[x] = ROWS - y; break; }
+  let holes = 0;
+  for (let x = 0; x < COLS; x++) {
+    let covered = false;
+    for (let y = 0; y < ROWS; y++) {
+      if (grid[y][x] !== ".") covered = true;
+      else if (covered) holes++;
+    }
+  }
+  let bump = 0;
+  for (let x = 0; x < COLS - 1; x++) bump += Math.abs(heights[x] - heights[x + 1]);
+  const wells = [];
+  for (let x = 0; x < COLS; x++) {
+    const left = x === 0 ? Infinity : heights[x - 1];
+    const right = x === COLS - 1 ? Infinity : heights[x + 1];
+    const d = Math.min(left, right) - heights[x];
+    if (d >= 3) wells.push({ column: x, depth: d });
+  }
+  return { heights, maxHeight: Math.max(...heights), aggregateHeight: heights.reduce((a, b) => a + b, 0), holes, bumpiness: bump, wells };
+}
+function clearGridRows(grid) {
+  const kept = grid.filter(r => r.some(c => c === ".")).map(r => r.slice());
+  const cleared = ROWS - kept.length;
+  while (kept.length < ROWS) kept.unshift(Array(COLS).fill("."));
+  return { grid: kept, cleared };
+}
+// —— 数字转词：Jev 读文本强于算术（官方 jaggedness notes）——
+function describeLines(n) { return ["none", "one line", "two lines", "three lines", "four lines (a Tetris)"][n] ?? `${n} lines`; }
+function describeHoles(n) { return n === 0 ? "none" : n === 1 ? "one hole" : n === 2 ? "two holes" : "three or more holes"; }
+function describeHeight(h) {
+  if (h <= 4) return "very low"; if (h <= 8) return "low"; if (h <= 12) return "medium";
+  if (h <= 15) return "high"; return "dangerously high, close to the top";
+}
+function describeSurface(b) { return b <= 4 ? "flat" : b <= 9 ? "slightly uneven" : b <= 16 ? "bumpy" : "very jagged"; }
+function describeWells(list) {
+  if (!list.length) return "no deep wells";
+  if (list.length === 1) return `one deep well at column ${list[0].column + 1}`;
+  return `${list.length} deep wells`;
+}
+function heuristicScore(after, linesCleared) {
+  return -0.51 * after.aggregateHeight + 0.76 * linesCleared - 0.36 * after.holes - 0.18 * after.bumpiness;
+}
+// 枚举当前方块的每个合法落点（rotation × column），模拟锁定后的结果
+function enumeratePlacements(engine) {
+  const type = engine.cur.type;
+  const before = gridStats(engine.grid);
+  const seen = new Set();
+  const placements = [];
+  SHAPES[type].forEach((m, rot) => {
+    for (let x = 0; x <= COLS - m[0].length; x++) {
+      if (collidesGrid(engine.grid, m, x, 0)) continue;
+      let y = 0;
+      while (!collidesGrid(engine.grid, m, x, y + 1)) y++;
+      const locked = engine.grid.map(r => r.slice());
+      for (let my = 0; my < m.length; my++) for (let mx = 0; mx < m[my].length; mx++)
+        if (m[my][mx] && y + my >= 0) locked[y + my][x + mx] = type;
+      const key = locked.map(r => r.join("")).join("/");
+      if (seen.has(key)) continue; // 不同旋转产生相同结果（O/I/S/Z）
+      seen.add(key);
+      const { grid: afterGrid, cleared } = clearGridRows(locked);
+      const after = gridStats(afterGrid);
+      const p = {
+        id: `p${placements.length}`,
+        type, rot, x, y,
+        linesCleared: cleared,
+        holesCreated: Math.max(0, after.holes - before.holes),
+        holesRemoved: Math.max(0, before.holes - after.holes),
+        heightDelta: after.maxHeight - before.maxHeight,
+        after,
+      };
+      p.heuristic = heuristicScore(after, cleared);
+      placements.push(p);
+    }
+  });
+  return placements;
+}
+// Choice criteria 条目：每个落点一个对象，字段名跨选项一致，全部用词不用数
+function describePlacement(p) {
+  const m = SHAPES[p.type][p.rot];
+  const left = p.x + 1, right = p.x + m[0].length;
+  const where = left === right ? `column ${left}` : `columns ${left}-${right}`;
+  let hChange;
+  if (p.linesCleared > 0 && p.heightDelta < 0) hChange = "stack gets lower";
+  else if (p.heightDelta <= 0) hChange = "stack does not get taller";
+  else if (p.heightDelta === 1) hChange = "stack grows by one row";
+  else hChange = "stack grows by several rows";
+  return {
+    where,
+    lines_cleared: describeLines(p.linesCleared),
+    holes_created: describeHoles(p.holesCreated),
+    holes_uncovered: p.holesRemoved > 0 ? describeHoles(p.holesRemoved) : "none",
+    stack_height_after: describeHeight(p.after.maxHeight),
+    height_change: hChange,
+    surface_after: describeSurface(p.after.bumpiness),
+    wells_after: describeWells(p.after.wells),
+  };
+}
+// Jev 的 placement 问题：priorities 列表即权重，想改风格改这里
+const PLACEMENT_PRIORITIES = [
+  "Clearing lines is good. Clearing more lines at once is better.",
+  "Do not create holes. A placement with holes_created of none beats one that creates holes, unless the one with holes clears far more lines or the stack is dangerously high.",
+  "Keep the stack low. Prefer a lower stack_height_after and a height_change that does not grow the stack.",
+  "Keep the surface flat. Prefer surface_after of flat over slightly uneven, bumpy, or very jagged.",
+  "One deep well is acceptable because the next I piece can fill it. Several deep wells are bad.",
+  "When the stack is dangerously high, survival matters more than a clean surface.",
+];
+const STRATEGY_OPTIONS = {
+  build_clean: "The stack is low and tidy. Keep building a flat surface and wait for a chance to clear several lines at once.",
+  clear_lines: "Lines can be cleared soon. Take clears as they come and keep the stack from growing.",
+  repair_surface: "The surface is jagged or has holes. Prefer placements that smooth it out or uncover holes, even without clearing lines.",
+  survive: "The stack is close to the top. Take any placement that lowers or does not raise the stack, even if it is ugly.",
+};
+const HEALTH_LEVELS = [
+  "Clean: low, flat stack with no holes",
+  "Fine: some unevenness or a hole or two, plenty of room",
+  "Rough: several holes or a jagged surface, room is shrinking",
+  "Critical: stack near the top, the game may be lost within a few pieces",
+];
+function buildState(engine) {
+  const stats = gridStats(engine.grid);
+  return {
+    game: {
+      rules: "Standard Tetris. Board is 10 columns wide and 20 rows tall. Rows fill left to right; a full row disappears. The game is lost when the stack reaches the top.",
+      board_rows_top_to_bottom: engine.grid.map(r => r.join("")),
+      legend: "# is a filled cell, . is an empty cell. The first row is the top of the board.",
+      column_heights_left_to_right: stats.heights,
+      stack_height: describeHeight(stats.maxHeight),
+      holes_in_stack: describeHoles(stats.holes),
+      surface: describeSurface(stats.bumpiness),
+      current_piece: engine.cur.type,
+      next_piece: engine.nextType,
+      lines_cleared_so_far: engine.lines,
+    },
+  };
+}
+function buildQuestions(placements) {
+  const criteria = {};
+  for (const p of placements) criteria[p.id] = describePlacement(p);
+  return {
+    placement: {
+      type: "choice",
+      instructions: {
+        question: "Which placement of `game.current_piece` should the player choose? Each option describes the board after that placement.",
+        priorities: PLACEMENT_PRIORITIES,
+      },
+      criteria,
+    },
+    strategy: {
+      type: "choice",
+      instructions: "Looking at `game`, which strategy fits the current situation best for the next few pieces?",
+      criteria: STRATEGY_OPTIONS,
+    },
+    board_health: {
+      type: "score",
+      instructions: "How healthy is the stack in `game` for a Tetris player who wants to keep playing for a long time?",
+      criteria: HEALTH_LEVELS,
+    },
+    next_piece_fits: {
+      type: "noul",
+      instructions: "Given `game.column_heights_left_to_right` and `game.surface`, is there an obvious clean spot for `game.next_piece` after this move, without creating holes?",
+      criteria: {
+        true: "A clean spot is easy to see.",
+        false: "The next piece will be awkward to place.",
+      },
+    },
+  };
+}
+
+/* ---------- 渲染 ---------- */
+const engine = new Engine();
+const cv = document.getElementById("board");
+const ctx = cv.getContext("2d");
+const ncv = document.getElementById("next");
+const nctx = ncv.getContext("2d");
+const dpr = window.devicePixelRatio || 1;
+for (const [c, w, h] of [[cv, 260, 520], [ncv, 104, 104]]) {
+  c.width = w * dpr; c.height = h * dpr;
+  c.style.width = w + "px"; c.style.height = h + "px";
+  c.getContext("2d").scale(dpr, dpr);
+}
+function draw() {
+  ctx.fillStyle = "#fbfaf6"; ctx.fillRect(0, 0, 260, 520);
+  ctx.strokeStyle = "#eceade"; ctx.lineWidth = 1;
+  for (let x = 1; x < COLS; x++) { ctx.beginPath(); ctx.moveTo(x * CELL + .5, 0); ctx.lineTo(x * CELL + .5, ROWS * CELL); ctx.stroke(); }
+  for (let y = 1; y < ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * CELL + .5); ctx.lineTo(COLS * CELL, y * CELL + .5); ctx.stroke(); }
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++)
+    if (engine.grid[y][x] !== ".") cell(ctx, x, y, COLORS[engine.grid[y][x]]);
+  if (engine.cur && !engine.over) {
+    const m = SHAPES[engine.cur.type][engine.cur.rot];
+    const gy = engine.ghostY();
+    ctx.globalAlpha = 0.25;
+    for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++)
+      if (m[y][x] && gy + y >= 0) cell(ctx, engine.cur.x + x, gy + y, COLORS[engine.cur.type]);
+    ctx.globalAlpha = 1;
+    for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++)
+      if (m[y][x] && engine.cur.y + y >= 0) cell(ctx, engine.cur.x + x, engine.cur.y + y, COLORS[engine.cur.type]);
+  }
+  nctx.fillStyle = "#fbfaf6"; nctx.fillRect(0, 0, 104, 104);
+  const m = SHAPES[engine.nextType][0];
+  const size = Math.max(m.length, m[0].length);
+  const off = (104 - size * 20) / 2;
+  for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++)
+    if (m[y][x]) {
+      nctx.fillStyle = COLORS[engine.nextType];
+      nctx.fillRect(off + x * 20, off + y * 20, 18, 18);
+      nctx.strokeStyle = "rgba(0,0,0,.25)"; nctx.strokeRect(off + x * 20 + .5, off + y * 20 + .5, 17, 17);
+    }
+  document.getElementById("score").textContent = engine.score;
+  document.getElementById("lines").textContent = engine.lines;
+  document.getElementById("level").textContent = engine.level;
+}
+function cell(c, x, y, color) {
+  c.fillStyle = color;
+  c.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+  c.fillStyle = "rgba(255,255,255,.35)";
+  c.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, 4);
+  c.strokeStyle = "rgba(0,0,0,.3)";
+  c.strokeRect(x * CELL + 1.5, y * CELL + 1.5, CELL - 3, CELL - 3);
+}
+
+/* ---------- 覆盖层 ---------- */
+const overlay = document.getElementById("overlay");
+const overlayTitle = document.getElementById("overlayTitle");
+const overlayHint = document.getElementById("overlayHint");
+const overlayBtn = document.getElementById("overlayBtn");
+function showOverlay(title, hint, btnText) {
+  overlayTitle.textContent = title; overlayHint.textContent = hint;
+  overlayBtn.textContent = btnText; overlay.classList.remove("hidden");
+}
+function hideOverlay() { overlay.classList.add("hidden"); }
+overlayBtn.addEventListener("click", () => { manualStart(); cv.focus(); });
+function manualStart() {
+  if (engine.over) engine.reset();
+  engine.start(); engine.paused = false; hideOverlay();
+}
+
+/* ---------- 键盘输入 ---------- */
+document.addEventListener("keydown", (e) => {
+  if (JevPlayer.running) return;
+  if (!engine.started || engine.over) {
+    if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(e.key)) { e.preventDefault(); manualStart(); }
+    return;
+  }
+  switch (e.key) {
+    case "ArrowLeft":  engine.applyAction("left"); e.preventDefault(); break;
+    case "ArrowRight": engine.applyAction("right"); e.preventDefault(); break;
+    case "ArrowUp":    engine.applyAction("rotate"); e.preventDefault(); break;
+    case "z": case "Z": engine.applyAction("rotate_ccw"); break;
+    case "ArrowDown":  engine.applyAction("soft_drop"); e.preventDefault(); break;
+    case " ":          engine.applyAction("hard_drop"); e.preventDefault(); break;
+    case "p": case "P": engine.paused = !engine.paused; break;
+    case "r": case "R": engine.reset(); break;
+  }
+});
+
+/* ---------- 重力循环 ---------- */
+let gravityTimer = null;
+function gravityLoop() {
+  clearInterval(gravityTimer);
+  gravityTimer = setInterval(() => {
+    if (engine.started && !engine.paused && !engine.over && engine.gravityOn && !JevPlayer.running) {
+      engine.gravityTick();
+      if (engine.over) showOverlay("GAME OVER", `得分 ${engine.score} · 按 R 重开`, "再来一局");
+    }
+    draw();
+  }, Math.max(100, 800 - (engine.level - 1) * 70));
+}
+engine.on("gameover", () => {
+  if (JevPlayer.running) JevPlayer.stop("游戏结束");
+  showOverlay("GAME OVER", `得分 ${engine.score}`, "再来一局");
+});
+
+/* ================================================================
+ *  Jev AI 玩家 v2
+ *  模式 A（默认·落点决策）：每方块一次请求，Jev 从全部合法落点中选，
+ *         代码负责把方块转到目标姿态并硬降 —— Code owns the game.
+ *  模式 B（逐步动作）：v1 的实验对比模式，保留。
+ * ================================================================ */
+const delay = (ms) => new Promise(r => setTimeout(r, ms));
+const fmtPlacement = (p) => {
+  const d = describePlacement(p);
+  return `${d.where} · ${d.lines_cleared} · holes ${d.holes_created}`;
+};
+
+const JevPlayer = {
+  running: false,
+  decisions: 0, tokens: 0, latSum: 0,
+  agreeCount: 0, heuristicCount: 0,
+  pieceMoves: 0,
+
+  el: {
+    key: document.getElementById("apiKey"),
+    model: document.getElementById("model"),
+    baseUrl: document.getElementById("baseUrl"),
+    interval: document.getElementById("interval"),
+    start: document.getElementById("aiStart"),
+    stop: document.getElementById("aiStop"),
+    err: document.getElementById("errbox"),
+    badge: document.getElementById("badge"),
+    log: document.getElementById("log"),
+    stDecisions: document.getElementById("stDecisions"),
+    stTokens: document.getElementById("stTokens"),
+    stLatency: document.getElementById("stLatency"),
+    stAgree: document.getElementById("stAgree"),
+  },
+
+  init() {
+    this.el.key.value = localStorage.getItem("typesafe_api_key") || "";
+    this.el.baseUrl.value = localStorage.getItem("jev_base_url") || this.el.baseUrl.value;
+    this.el.key.addEventListener("change", () => localStorage.setItem("typesafe_api_key", this.el.key.value.trim()));
+    this.el.baseUrl.addEventListener("change", () => localStorage.setItem("jev_base_url", this.el.baseUrl.value.trim()));
+    this.el.start.addEventListener("click", () => this.start());
+    this.el.stop.addEventListener("click", () => this.stop("已手动停止"));
+  },
+  mode() { return document.querySelector('input[name="aimode"]:checked').value; },
+
+  setBadge(text, cls) { this.el.badge.textContent = text; this.el.badge.className = "badge" + (cls ? " " + cls : ""); },
+  showError(msg) { this.el.err.textContent = msg; this.el.err.classList.add("show"); this.setBadge("错误", "err"); },
+  clearError() { this.el.err.classList.remove("show"); },
+  updateStats() {
+    this.el.stDecisions.textContent = this.decisions;
+    this.el.stTokens.textContent = this.tokens;
+    this.el.stLatency.textContent = this.decisions ? Math.round(this.latSum / this.decisions) + "ms" : "–";
+    this.el.stAgree.textContent = this.heuristicCount ? Math.round(100 * this.agreeCount / this.heuristicCount) + "%" : "–";
+  },
+
+  async start() {
+    if (this.running) return;
+    const key = this.el.key.value.trim();
+    if (!key) { this.showError("请先填入 TypeSafe API Key（console.typesafe.ai/keys 获取）"); return; }
+    localStorage.setItem("typesafe_api_key", key);
+    this.clearError();
+    this.running = true;
+    this.decisions = 0; this.tokens = 0; this.latSum = 0;
+    this.agreeCount = 0; this.heuristicCount = 0; this.pieceMoves = 0;
+    this.el.log.innerHTML = "";
+    this.el.start.disabled = true; this.el.stop.disabled = false;
+    this.setBadge("Jev 玩家中", "on");
+    engine.setGravity(false);
+    if (engine.over || !engine.started) engine.reset();
+    engine.start(); engine.paused = false; hideOverlay();
+    this.loop();
+  },
+  stop(reason) {
+    this.running = false;
+    this.el.start.disabled = false; this.el.stop.disabled = true;
+    this.setBadge("手动", "");
+    engine.setGravity(true);
+    if (reason && !engine.over) showOverlay("AI 已停止", reason + " · 可继续手动玩或重新启动", "继续游戏");
+    this.updateStats();
+  },
+
+  async askJev(body) {
+    const base = this.el.baseUrl.value.trim().replace(/\/+$/, "") || "https://api.typesafe.ai";
+    const maxRetry = 4;
+    for (let attempt = 0; ; attempt++) {
+      const resp = await fetch(base + "/v1/systemone", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + this.el.key.value.trim(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if ((resp.status === 429 || resp.status === 529) && attempt < maxRetry) {
+        const ra = Number(resp.headers.get("retry-after"));
+        await delay(Number.isFinite(ra) && ra > 0 ? ra * 1000 : 500 * 2 ** attempt);
+        continue;
+      }
+      if (!resp.ok) {
+        let detail = "";
+        try { const b = await resp.json(); detail = b?.detail?.message || JSON.stringify(b); } catch { detail = resp.statusText; }
+        throw new Error(`HTTP ${resp.status}: ${detail}`);
+      }
+      return resp.json();
+    }
+  },
+
+  appendLog(entry) {
+    const empty = this.el.log.querySelector(".empty");
+    if (empty) empty.remove();
+    const div = document.createElement("div");
+    div.className = "entry";
+    const bars = entry.top.map(([name, p, label]) =>
+      `<div class="bar"><span class="name" title="${label || name}">${label || name}</span>
+       <span class="track"><span class="fill ${name === entry.chosen ? "top" : ""}" style="width:${Math.round(p * 100)}%"></span></span>
+       <span class="pct">${Math.round(p * 100)}%</span></div>`).join("");
+    div.innerHTML = `
+      <div class="top">
+        <span class="no">#${entry.no}</span>
+        <span class="act">${entry.chosen}</span>
+        <span class="meta">conf ${(entry.confidence * 100).toFixed(0)}% · ${entry.ms}ms · ${entry.tok}tok</span>
+      </div>
+      <div class="sub">${entry.detail}</div>
+      <div class="bars">${bars}</div>
+      <div class="sub">${entry.strategy} · health ${entry.health} · next fits ${(entry.fits * 100).toFixed(0)}%
+        · <span class="${entry.agree ? "agree" : "disagree"}">${entry.agree ? "与启发式一致" : "与启发式不同"}</span></div>`;
+    this.el.log.prepend(div);
+    while (this.el.log.children.length > 30) this.el.log.lastChild.remove();
+  },
+
+  /* 把方块动画式地转到目标落点：旋转 → 平移 → 硬降 */
+  async executePlacement(p) {
+    let guard = 0;
+    while (engine.cur && engine.cur.rot !== p.rot && guard++ < 4) {
+      engine.applyAction("rotate");
+      draw(); await delay(80);
+    }
+    if (!engine.cur || engine.over) return;
+    const dx = p.x - engine.cur.x;
+    for (let i = 0; i < Math.abs(dx) && !engine.over; i++) {
+      engine.applyAction(dx > 0 ? "right" : "left");
+      draw(); await delay(60);
+    }
+    if (!engine.over) engine.applyAction("hard_drop");
+  },
+
+  /* 模式 A 主循环：每方块一次请求 */
+  async loop() {
+    const interval = () => Math.max(60, parseInt(this.el.interval.value, 10) || 120);
+    while (this.running) {
+      if (engine.over) { this.stop("游戏结束"); break; }
+      if (this.mode() === "placement") {
+        try {
+          this.setBadge("Jev 思考中…", "on");
+          const placements = enumeratePlacements(engine);
+          if (!placements.length) { engine.applyAction("hard_drop"); continue; }
+          const body = { state: buildState(engine), model: this.el.model.value.trim() || "jev-latest", questions: buildQuestions(placements) };
+          const t0 = performance.now();
+          const data = await this.askJev(body);
+          const ms = Math.round(performance.now() - t0);
+          const a = data.answers.placement;
+          const byId = new Map(placements.map(p => [p.id, p]));
+          const ranked = Object.entries(a.probabilities || {})
+            .filter(([id]) => byId.has(id)).sort((x, y) => y[1] - x[1]);
+          const chosen = byId.get(a.choice) || byId.get(ranked[0]?.[0]) || placements[0];
+          const strategy = data.answers.strategy?.choice || "–";
+          const health = data.answers.board_health?.score;
+          const fits = data.answers.next_piece_fits?.noul;
+          const tok = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
+          this.decisions++; this.tokens += tok; this.latSum += ms;
+          const hBest = placements.reduce((b, p) => (p.heuristic > b.heuristic ? p : b), placements[0]);
+          const agree = chosen.id === hBest.id;
+          this.heuristicCount++; if (agree) this.agreeCount++;
+          const cd = describePlacement(chosen);
+          this.appendLog({
+            no: this.decisions, chosen: fmtPlacement(chosen), confidence: a.confidence, ms, tok,
+            detail: `候选 ${placements.length} 个 · ${cd.height_change} · surface ${cd.surface_after}`,
+            top: ranked.slice(0, 3).map(([id, p]) => [id, p, fmtPlacement(byId.get(id))]),
+            strategy, health, fits, agree,
+          });
+          this.setBadge("Jev 执行中", "on");
+          await this.executePlacement(chosen);
+          this.updateStats();
+          if (engine.over) { this.stop("游戏结束"); break; }
+          await delay(interval());
+        } catch (err) {
+          this.showError(String(err.message || err) +
+            " —— 若为 CORS/网络错误，请先运行 node jev-proxy.mjs 并把 API 地址改为 http://localhost:8787");
+          this.stop("调用失败");
+          break;
+        }
+      } else {
+        /* 模式 B：逐步动作（v1 实验对比） */
+        if (this.pieceMoves >= 30) { engine.applyAction("hard_drop"); this.pieceMoves = 0; continue; }
+        try {
+          this.setBadge("Jev 思考中…", "on");
+          const t0 = performance.now();
+          const data = await this.askJev({
+            state: engine.getStateText(),
+            model: this.el.model.value.trim() || "jev-latest",
+            questions: {
+              action: {
+                type: "choice",
+                instructions: {
+                  goal: "You are playing Tetris step by step. Choose the best immediate action to keep the stack flat, avoid creating holes, and complete rows. You will be asked again after each action.",
+                  question: "What is the best next action for the current piece?",
+                },
+                criteria: {
+                  left: "Shift the current piece one column to the left, if it fits",
+                  right: "Shift the current piece one column to the right, if it fits",
+                  rotate: "Rotate the piece 90 degrees clockwise (wall kicks may shift it)",
+                  soft_drop: "Move the piece down one row",
+                  hard_drop: "Drop the piece instantly to the lowest valid position and lock it. Irreversible.",
+                },
+              },
+            },
+          });
+          const ms = Math.round(performance.now() - t0);
+          const a = data.answers.action;
+          const tok = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
+          this.decisions++; this.tokens += tok; this.latSum += ms;
+          this.appendLog({
+            no: this.decisions, chosen: a.choice, confidence: a.confidence, ms, tok,
+            detail: "逐步动作模式", top: Object.entries(a.probabilities).sort((x, y) => y[1] - x[1]).slice(0, 3),
+            strategy: "–", health: "–", fits: 0, agree: true,
+          });
+          this.setBadge("Jev 执行中", "on");
+          const r = engine.applyAction(a.choice);
+          if (r.locked || !r.moved) this.pieceMoves = 0; else this.pieceMoves++;
+          if (r.gameOver) { this.stop("游戏结束"); break; }
+          this.updateStats();
+          await delay(interval());
+        } catch (err) {
+          this.showError(String(err.message || err));
+          this.stop("调用失败");
+          break;
+        }
+      }
+    }
+  },
+};
+JevPlayer.init();
+
+/* ---------- 外部智能体接口 ---------- */
+window.TetrisAPI = {
+  getState: () => engine.getState(),
+  getStateText: () => engine.getStateText(),
+  getPlacements: () => {
+    const ps = enumeratePlacements(engine);
+    return ps.map(p => ({ id: p.id, rot: p.rot, x: p.x, ...describePlacement(p), heuristic: p.heuristic }));
+  },
+  executePlacement: (p) => {
+    let guard = 0;
+    while (engine.cur && engine.cur.rot !== p.rot && guard++ < 4) engine.applyAction("rotate");
+    const dx = p.x - engine.cur.x;
+    for (let i = 0; i < Math.abs(dx); i++) engine.applyAction(dx > 0 ? "right" : "left");
+    return engine.applyAction("hard_drop");
+  },
+  onEvent: (evt, cb) => engine.on(evt, cb),
+  setGravity: (on) => engine.setGravity(!!on),
+  start: () => { engine.reset(); engine.start(); engine.paused = false; hideOverlay(); },
+  reset: () => engine.reset(),
+  isGameOver: () => engine.over,
+};
+
+/* ---------- 启动 ---------- */
+gravityLoop();
+draw();
+</script>
+</body>
+</html>
