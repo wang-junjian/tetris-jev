@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   Engine, mulberry32, enumeratePlacements, gridStats,
-  buildState, buildQuestions, describePlacement,
+  buildState, buildQuestions,
 } from "../engine.js";
 
 /* ---------- 参数 ---------- */
@@ -90,7 +90,7 @@ function jevDecideFactory(key, model, log) {
       tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
       piece: engine.cur.type, next: engine.nextType,
       state: body.state.game,
-      candidates: placements.map(p => ({ id: p.id, rot: p.rot, x: p.x, heuristic: +p.heuristic.toFixed(2), desc: describePlacement(p) })),
+      candidates: placements.map(p => ({ id: p.id, rot: p.rot, x: p.x, heuristic: +p.heuristic.toFixed(2), desc: body.questions.placement.criteria[p.id] })),
       answers: {
         placement: { choice: a.choice, confidence: a.confidence, probabilities: a.probabilities },
         strategy: data.answers.strategy?.choice,
