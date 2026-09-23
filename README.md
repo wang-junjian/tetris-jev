@@ -2,9 +2,10 @@
 
 Web 版俄罗斯方块，内置 **Jev**（TypeSafe System One）AI 玩家，让 AI 自己玩游戏；同时暴露 `window.TetrisAPI` 接口，任何外部智能体（Playwright / Puppeteer / LLM）都能驱动游戏。
 
-- 单文件、零依赖：`index.html` 打开即玩
-- 内置 Jev 玩家：每个方块一次 API 调用，从 12~34 个候选落点中做「品味判断」
+- 零依赖：`node jev-proxy.mjs` 一条命令同时托管页面和代理 API
+- 内置 Jev 玩家：每个方块一次 API 调用，从全部合法候选落点中做「品味判断」
 - 完整决策日志：概率分布、置信度、耗时、token、与经典启发式一致率
+- 固定种子评估工具：Node 批量对局，Jev / 启发式 / 随机同环境对照
 
 ## 演示
 
@@ -16,16 +17,31 @@ Web 版俄罗斯方块，内置 **Jev**（TypeSafe System One）AI 玩家，让 
 
 ## 快速开始
 
-TypeSafe API 的 CORS 是 origin 白名单模式，浏览器无法直连，需要先启动本地代理：
+TypeSafe API 的 CORS 是 origin 白名单模式，浏览器无法直连，需要先启动本地代理（它同时静态托管页面——index.html 已拆分为 ES module，file:// 直开会被浏览器拦截）：
 
 ```bash
 # 1. 启动代理（key 放环境变量，或在页面里填）
 TYPESAFE_API_KEY=sk-xxxx node jev-proxy.mjs 8787
 
-# 2. 浏览器打开 index.html，API 地址填 http://localhost:8787
+# 2. 浏览器打开 http://localhost:8787
 
 # 3. 点「▶ 启动 Jev 玩家」，观察决策日志
 ```
+
+## 评估工具（固定种子批量对局）
+
+`engine.js` 是浏览器 / Node 共享的引擎模块，评估工具用它无头跑批量对局，种子固定、结果可复现，是所有改动的回归基准：
+
+```bash
+node eval/harness.mjs --player heuristic --games 100        # 启发式对照（标尺）
+node eval/harness.mjs --player random --games 100           # 随机对照
+TYPESAFE_API_KEY=sk-... node eval/harness.mjs --player jev --games 20 \
+    --log eval/runs/jev-v2.jsonl                            # Jev + 决策日志（供失误诊断）
+```
+
+当前基线（100 局固定种子，每局 500 块截断）：启发式平均消行 **193.9**（97 局打满截断），随机 **0**（平均存活 20 块）。Jev 基线待测。
+
+> 注：评估工具上线首日就立功——发现落点枚举漏掉了贴墙落点（旋转矩阵的空边框导致竖直 I 无法落在 column 0 等），修复前启发式也只有平均 5.8 行。该 bug 此前同样限制了 Jev 的候选集。
 
 ## 功能特性
 
@@ -76,10 +92,15 @@ while (!(await page.evaluate(() => TetrisAPI.getState().gameOver))) {
 ## 项目结构
 
 ```
-├── index.html                      # 单文件游戏 + Jev 玩家 + TetrisAPI
-├── jev-proxy.mjs                   # 70 行零依赖 Node CORS 代理
+├── index.html                      # 页面：渲染 / 输入 / Jev 玩家 / TetrisAPI
+├── engine.js                       # 共享引擎（浏览器 / Node 通用）：引擎 + 落点枚举 + 词化 + Jev 问题构造
+├── jev-proxy.mjs                   # 零依赖 Node 代理：CORS 转发 + 静态托管
+├── CONTEXT.md                      # 领域术语表（Jev 驱动 / 词化 / 对照玩家 / 劣招标注…）
+├── eval/
+│   └── harness.mjs                 # 固定种子批量对局评估工具
 └── docs/
     ├── jev-development-guide.html  # 完整开发指南（浅色 HTML，可离线阅读）
+    ├── adr/                        # 架构决策记录（0001: 决策路径禁止代码估值）
     └── assets/                     # demo.png / demo.mov / demo.mp4
 ```
 

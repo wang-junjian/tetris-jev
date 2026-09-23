@@ -14,10 +14,21 @@
  * API key 仍可填在页面里（代理只转发 Authorization 头，客户端携带的优先）。
  */
 import http from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const UPSTREAM = "https://api.typesafe.ai";
 const ENV_KEY = process.env.TYPESAFE_API_KEY || "";
+const ROOT = fileURLToPath(new URL(".", import.meta.url));
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json",
+};
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -30,6 +41,24 @@ http.createServer(async (req, res) => {
   // 统一补 CORS 头
   for (const [k, v] of Object.entries(CORS)) res.setHeader(k, v);
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+
+  // GET：静态托管（index.html 已改为 ES module，file:// 直开会被浏览器拦截）
+  if (req.method === "GET") {
+    const urlPath = decodeURIComponent(req.url.split("?")[0]);
+    const rel = normalize(urlPath).replace(/^([/\\])+/, "");
+    const file = join(ROOT, rel === "" || rel === "." ? "index.html" : rel);
+    if (!file.startsWith(ROOT)) { // ROOT 以分隔符结尾，阻止 ../ 穿越
+      res.writeHead(403); res.end("forbidden"); return;
+    }
+    try {
+      const data = await readFile(file);
+      res.writeHead(200, { "Content-Type": MIME[extname(file)] || "application/octet-stream" });
+      res.end(data);
+    } catch {
+      res.writeHead(404); res.end("not found");
+    }
+    return;
+  }
 
   if (req.method !== "POST" || !req.url.startsWith("/v1/")) {
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -68,5 +97,6 @@ http.createServer(async (req, res) => {
   }
 }).listen(PORT, () => {
   console.log(`Jev proxy listening on http://localhost:${PORT}  ->  ${UPSTREAM}`);
+  console.log(`页面入口: http://localhost:${PORT}/  （静态托管 + /v1/* 转发）`);
   console.log(ENV_KEY ? "Using TYPESAFE_API_KEY from env." : "No env key set; page-side key will be forwarded.");
 });
