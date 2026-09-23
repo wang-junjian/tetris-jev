@@ -306,6 +306,9 @@ export function enumeratePlacements(engine) {
   });
   return placements;
 }
+// 数字转词（显著事实中的计数，Jev 读词强于读数）
+const NUM_WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+const numWord = n => (n <= 10 ? NUM_WORDS[n] : String(n));
 // Choice criteria 条目：每个落点一个对象，字段名跨选项一致，全部用词不用数
 export function describePlacement(p) {
   const left = p.colLeft + 1, right = p.colRight + 1; // 1-indexed，按实际占据列
@@ -325,6 +328,39 @@ export function describePlacement(p) {
     surface_after: describeSurface(p.after.bumpiness),
     wells_after: describeWells(p.after.wells),
   };
+}
+// 显著事实（CONTEXT.md）：跨落点的客观比较事实（唯一 / 最高 / 最低 / 排名），
+// 全部由候选落点数据复算，不含方向性评价 —— ADR 0001 边界内。
+// 动机见 docs/jev-v2-failure-patterns.md P1/P2：消行能力埋在普通字段里被忽视。
+// 返回 { id: desc }，desc 在 describePlacement 基础上按需追加 salient_facts 数组。
+export function describePlacements(placements) {
+  const descs = {};
+  for (const p of placements) descs[p.id] = describePlacement(p);
+  const clearers = placements.filter(p => p.linesCleared > 0);
+  const holeFree = placements.filter(p => p.holesCreated === 0);
+  const minH = Math.min(...holeFree.map(p => p.after.maxHeight));
+  const lowest = holeFree.filter(p => p.after.maxHeight === minH);
+  for (const p of placements) {
+    const facts = [];
+    if (p.linesCleared > 0) {
+      if (clearers.length === 1) facts.push("the only placement that clears a line");
+      else facts.push(`one of the ${numWord(clearers.length)} placements that clear lines`);
+      const maxClear = Math.max(...clearers.map(q => q.linesCleared));
+      if (maxClear > 1 && p.linesCleared === maxClear && clearers.every(q => q === p || q.linesCleared < maxClear))
+        facts.push("clears the most lines of any placement");
+    }
+    if (p.holesCreated === 0 && holeFree.length > 1) {
+      if (lowest.length === 1 && lowest[0] === p)
+        facts.push(`the lowest stack among the ${numWord(holeFree.length)} hole-free placements`);
+      else if (lowest.length > 1 && lowest.length <= 3 && lowest.includes(p))
+        // 并列只在小集团（≤3）内报告：大集团并列无区分度，反而是噪音
+        facts.push(`tied for the lowest stack among the ${numWord(holeFree.length)} hole-free placements`);
+    }
+    if (p.holesCreated === 0 && holeFree.length === 1)
+      facts.push("the only placement that creates no holes");
+    if (facts.length) descs[p.id].salient_facts = facts;
+  }
+  return descs;
 }
 // Jev 的 placement 问题：priorities 列表即权重，想改风格改这里
 export const PLACEMENT_PRIORITIES = [
@@ -365,8 +401,7 @@ export function buildState(engine) {
   };
 }
 export function buildQuestions(placements) {
-  const criteria = {};
-  for (const p of placements) criteria[p.id] = describePlacement(p);
+  const criteria = describePlacements(placements); // 含显著事实，日志记录同一版本
   return {
     placement: {
       type: "choice",
