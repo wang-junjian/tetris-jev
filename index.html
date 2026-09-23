@@ -154,6 +154,8 @@
             <span><b>落点决策</b>（每方块一次调用）<small>代码枚举全部合法落点并模拟结果，Jev 从中选择 —— 参考验证过的 jev-tetris 设计</small></span></label>
           <label><input type="radio" name="aimode" value="step">
             <span><b>逐步动作</b>（每步一次调用）<small>实验对比用：Jev 逐步指挥 left/right/rotate/drop，概率通常较分散</small></span></label>
+          <label style="margin-left:22px"><input type="checkbox" id="chain">
+            <span><b>判断链</b>（实验：先 strategy 后落点，每方块两次调用）<small>已验证为回退（v4 均值 50.5 行 vs 单请求 71.5），仅作对照</small></span></label>
         </div>
         <div class="row-btns">
           <button class="primary" id="aiStart">▶ 启动 Jev 玩家</button>
@@ -225,7 +227,7 @@ while (!(await page.evaluate(() => TetrisAPI.getState().gameOver))) {
 </div>
 
 <footer>
-  设计参考 trungdq88/jev-tetris（Jev 官方生态验证过的玩法）：代码枚举全部合法落点并模拟结果，把数字转成文字（Jev 读文本强于算术），一个请求并行携带 placement Choice + strategy/board_health/next_piece_fits 投机问题。官方 API 不允许浏览器直连（CORS 白名单），先运行 <code>node jev-proxy.mjs 8787</code>。
+  设计参考 trungdq88/jev-tetris（Jev 官方生态验证过的玩法）：代码枚举全部合法落点并模拟结果，把数字转成文字（Jev 读文本强于算术），一个请求并行携带 placement Choice + strategy/board_health/next_piece_fits 投机问题；「判断链」（先 strategy 后落点两跳）为实验开关，已验证为回退，仅作对照。官方 API 不允许浏览器直连（CORS 白名单），先运行 <code>node jev-proxy.mjs 8787</code>。
 </footer>
 
 <script type="module">
@@ -235,7 +237,7 @@ while (!(await page.evaluate(() => TetrisAPI.getState().gameOver))) {
  *  注意：ES module 下 file:// 直开会被浏览器拦截，
  *  请运行 node jev-proxy.mjs 后访问 http://localhost:8787
  * ================================================================ */
-import { Engine, SHAPES, COLS, ROWS, enumeratePlacements, describePlacement, buildState, buildQuestions } from "./engine.js";
+import { Engine, SHAPES, COLS, ROWS, enumeratePlacements, describePlacement, buildState, buildQuestions, buildStrategyQuestions, buildPlacementQuestions, STRATEGY_OPTIONS } from "./engine.js";
 
 const CELL = 26;
 
@@ -377,6 +379,7 @@ const JevPlayer = {
     model: document.getElementById("model"),
     baseUrl: document.getElementById("baseUrl"),
     interval: document.getElementById("interval"),
+    chain: document.getElementById("chain"),
     start: document.getElementById("aiStart"),
     stop: document.getElementById("aiStop"),
     err: document.getElementById("errbox"),
@@ -496,7 +499,7 @@ const JevPlayer = {
     if (!engine.over) engine.applyAction("hard_drop");
   },
 
-  /* 模式 A 主循环：每方块一次请求 */
+  /* 模式 A 主循环：默认每方块一次请求；勾选「判断链」则两跳（先 strategy 后落点） */
   async loop() {
     const interval = () => Math.max(60, parseInt(this.el.interval.value, 10) || 120);
     while (this.running) {
@@ -506,19 +509,29 @@ const JevPlayer = {
           this.setBadge("Jev 思考中…", "on");
           const placements = enumeratePlacements(engine);
           if (!placements.length) { engine.applyAction("hard_drop"); continue; }
-          const body = { state: buildState(engine), model: this.el.model.value.trim() || "jev-latest", questions: buildQuestions(placements) };
+          const model = this.el.model.value.trim() || "jev-latest";
+          const chain = this.el.chain.checked;
           const t0 = performance.now();
-          const data = await this.askJev(body);
+          // 判断链第一跳（实验）：strategy（board_health / next_piece_fits 投机问题随附）
+          let d1 = null, strategy;
+          if (chain) {
+            d1 = await this.askJev({ state: buildState(engine), model, questions: buildStrategyQuestions() });
+            strategy = d1.answers.strategy?.choice;
+          }
+          // 第二跳（判断链）/ 唯一一跳（默认）：placement
+          const state = buildState(engine, { strategy: strategy ? `${strategy}: ${STRATEGY_OPTIONS[strategy]}` : undefined });
+          const d2 = await this.askJev({ state, model, questions: chain ? buildPlacementQuestions(placements) : buildQuestions(placements) });
           const ms = Math.round(performance.now() - t0);
-          const a = data.answers.placement;
+          const a = d2.answers.placement;
           const byId = new Map(placements.map(p => [p.id, p]));
           const ranked = Object.entries(a.probabilities || {})
             .filter(([id]) => byId.has(id)).sort((x, y) => y[1] - x[1]);
           const chosen = byId.get(a.choice) || byId.get(ranked[0]?.[0]) || placements[0];
-          const strategy = data.answers.strategy?.choice || "–";
-          const health = data.answers.board_health?.score;
-          const fits = data.answers.next_piece_fits?.noul;
-          const tok = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
+          if (!chain) strategy = d2.answers.strategy?.choice;
+          const health = (d1 || d2).answers.board_health?.score;
+          const fits = (d1 || d2).answers.next_piece_fits?.noul;
+          const tok = (d1 ? (d1.usage?.input_tokens || 0) + (d1.usage?.output_tokens || 0) : 0)
+                    + ((d2.usage?.input_tokens || 0) + (d2.usage?.output_tokens || 0));
           this.decisions++; this.tokens += tok; this.latSum += ms;
           const hBest = placements.reduce((b, p) => (p.heuristic > b.heuristic ? p : b), placements[0]);
           const agree = chosen.id === hBest.id;
@@ -528,7 +541,7 @@ const JevPlayer = {
             no: this.decisions, chosen: fmtPlacement(chosen), confidence: a.confidence, ms, tok,
             detail: `候选 ${placements.length} 个 · ${cd.height_change} · surface ${cd.surface_after}`,
             top: ranked.slice(0, 3).map(([id, p]) => [id, p, fmtPlacement(byId.get(id))]),
-            strategy, health, fits, agree,
+            strategy: strategy || "–", health, fits, agree,
           });
           this.setBadge("Jev 执行中", "on");
           await this.executePlacement(chosen);
