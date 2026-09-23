@@ -47,6 +47,18 @@
   （clear_lines 仅 4/332）使喂回文本大多不利于消行。
   **结论**：判断链降级为实验开关（`--chain 1` / 页面复选框），默认保持 v3 单请求。
   若后续重启此方向，需先重做策略选项词化（P4：去掉反消行措辞、合并模糊边界）。
+- [x] **5b. P4 策略词化重做**：`STRATEGY_OPTIONS` 四条全部重写——可观测触发条件 +
+  正向动作，去掉反消行措辞（"even without clearing lines" / "even if it is ugly"），
+  新增 `STRATEGY_INSTRUCTIONS` 共享常量含紧迫度裁决（survive > repair_surface >
+  clear_lines > build_clean）。
+  **已验证**（2026-09-23，链模式，seeds 0-1，max-pieces 200，
+  日志 `eval/runs/jev-v5.jsonl`，诊断 `eval/runs/jev-v5-diagnosis.md`）：
+  **46 / 66 行（均值 56.0，比 v4 +11%），seed 1 打满 200 块**（v4 两局均 top-out）。
+  策略层靶子全部命中：clear_lines 选择率 1.2%→6.0%、危高→survive 保持 100%、
+  **放弃消行 5 次→0 次（P2 清零）**、最大分差 8.13→2.76、劣招率 5.1%→4.0%。
+  **残余**：均值仍低于 v3 单请求（56.0 vs 71.5，-22%），I 块劣招率 10.2%（v3 为 5.4%，
+  P1 在链模式下未完全消退）。**结论**：P4 修复了策略层，但判断链结构本身仍是回退，
+  默认保持 v3 单请求不变；`--chain 1` 继续仅作对照。
 - [ ] **6. fan-out 打分实验**：30 落点并行独立 Score，代码只取最高分。
   仅作对照实验（开关控制），用数据决定去留——细粒度打分的可比性存疑。
 - [ ] **7. 文档与 prompt 存档**：更新 `docs/jev-development-guide.html`

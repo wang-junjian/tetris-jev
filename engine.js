@@ -371,12 +371,18 @@ export const PLACEMENT_PRIORITIES = [
   "One deep well is acceptable because the next I piece can fill it. Several deep wells are bad.",
   "When the stack is dangerously high, survival matters more than a clean surface.",
 ];
+// P4（2026-09-23 重做）：每个选项 = 可观测触发条件（对应 state 字段）+ 正向动作。
+// 旧词化两宗罪：repair_surface/survive 带反消行措辞（"even without clearing lines" /
+// "even if it is ugly"），链模式喂回后与 priorities 竞争权重；触发条件不可观测
+// （"Lines can be cleared soon"），导致分布极端偏斜（v3 clear_lines 仅 3/400）。
 export const STRATEGY_OPTIONS = {
-  build_clean: "The stack is low and tidy. Keep building a flat surface and wait for a chance to clear several lines at once.",
-  clear_lines: "Lines can be cleared soon. Take clears as they come and keep the stack from growing.",
-  repair_surface: "The surface is jagged or has holes. Prefer placements that smooth it out or uncover holes, even without clearing lines.",
-  survive: "The stack is close to the top. Take any placement that lowers or does not raise the stack, even if it is ugly.",
+  build_clean: "The stack is low, flat, and has no holes. Keep it low and flat while setting up the next line clear.",
+  clear_lines: "One or more rows are nearly full, and the current or next piece can complete them. Complete those rows now.",
+  repair_surface: "The stack has holes or a jagged surface, and is not dangerously high. Uncover holes and flatten the surface so rows can be completed again.",
+  survive: "The stack is dangerously high. Bring it down: clear lines if possible, otherwise choose placements that do not raise the stack.",
 };
+// 平局裁决按紧迫度：触发条件互斥化，避免 build_clean / clear_lines 的模糊边界
+export const STRATEGY_INSTRUCTIONS = "Looking at `game`, which strategy fits the current situation best for the next few pieces? If several triggers apply, pick the most urgent one: survive first, then repair_surface, then clear_lines, then build_clean.";
 export const HEALTH_LEVELS = [
   "Clean: low, flat stack with no holes",
   "Fine: some unevenness or a hole or two, plenty of room",
@@ -415,7 +421,7 @@ export function buildQuestions(placements) {
     },
     strategy: {
       type: "choice",
-      instructions: "Looking at `game`, which strategy fits the current situation best for the next few pieces?",
+      instructions: STRATEGY_INSTRUCTIONS,
       criteria: STRATEGY_OPTIONS,
     },
     board_health: {
@@ -441,7 +447,7 @@ export function buildStrategyQuestions() {
   return {
     strategy: {
       type: "choice",
-      instructions: "Looking at `game`, which strategy fits the current situation best for the next few pieces?",
+      instructions: STRATEGY_INSTRUCTIONS,
       criteria: STRATEGY_OPTIONS,
     },
     board_health: {
