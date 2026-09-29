@@ -145,6 +145,8 @@
           <input type="text" id="model" value="jev-latest">
           <label for="baseUrl">API 地址</label>
           <input type="text" id="baseUrl" value="http://localhost:8787">
+          <label>后端</label>
+          <span id="providerTag" style="font: 12px var(--mono); color: #6b675f; align-self: center;">探测中…</span>
           <label for="interval">动作间隔</label>
           <input type="text" id="interval" value="120">
         </div>
@@ -378,6 +380,7 @@ const JevPlayer = {
     key: document.getElementById("apiKey"),
     model: document.getElementById("model"),
     baseUrl: document.getElementById("baseUrl"),
+    providerTag: document.getElementById("providerTag"),
     interval: document.getElementById("interval"),
     chain: document.getElementById("chain"),
     start: document.getElementById("aiStart"),
@@ -395,11 +398,42 @@ const JevPlayer = {
     this.el.key.value = localStorage.getItem("typesafe_api_key") || "";
     this.el.baseUrl.value = localStorage.getItem("jev_base_url") || this.el.baseUrl.value;
     this.el.key.addEventListener("change", () => localStorage.setItem("typesafe_api_key", this.el.key.value.trim()));
-    this.el.baseUrl.addEventListener("change", () => localStorage.setItem("jev_base_url", this.el.baseUrl.value.trim()));
+    this.el.baseUrl.addEventListener("change", () => {
+      localStorage.setItem("jev_base_url", this.el.baseUrl.value.trim());
+      this.probeProvider();
+    });
+    this.probeProvider();
     this.el.start.addEventListener("click", () => this.start());
     this.el.stop.addEventListener("click", () => this.stop("已手动停止"));
   },
+
+  /* 后端探测：GET /v1/health 区分本地 Laya（laya-server.py）与 Jev 云端代理。
+     双后端同协议（POST /v1/systemone），探测只影响 key 是否必填、提示文案与默认模型名。
+     探测失败按 Jev 处理，不影响原有用法。 */
+  provider: "jev",
+  async probeProvider() {
+    const base = this.el.baseUrl.value.trim().replace(/\/+$/, "");
+    const tag = this.el.providerTag;
+    const setTag = (text, color) => { tag.textContent = text; tag.style.color = color; };
+    try {
+      const resp = await fetch(base + "/v1/health", { signal: AbortSignal.timeout(1500) });
+      const info = await resp.json();
+      if (info.provider === "laya") {
+        this.provider = "laya";
+        setTag(`本地 Laya（${info.default_checkpoint}）`, "#1a7f37");
+        // 默认模型名跟随后端；用户手改过的不覆盖
+        if (!this.el.model.value.trim() || this.el.model.value.trim() === "jev-latest") {
+          this.el.model.value = "laya-typed";
+        }
+        return;
+      }
+    } catch { /* 404 / 网络失败都走 Jev 分支 */ }
+    this.provider = "jev";
+    setTag("Jev (TypeSafe)", "#6b675f");
+  },
   mode() { return document.querySelector('input[name="aimode"]:checked').value; },
+  /* 徽章文案跟随后端：本地 Laya 显示 Laya，否则 Jev */
+  playerName() { return this.provider === "laya" ? "Laya" : "Jev"; },
 
   setBadge(text, cls) { this.el.badge.textContent = text; this.el.badge.className = "badge" + (cls ? " " + cls : ""); },
   showError(msg) { this.el.err.textContent = msg; this.el.err.classList.add("show"); this.setBadge("错误", "err"); },
@@ -414,7 +448,7 @@ const JevPlayer = {
   async start() {
     if (this.running) return;
     const key = this.el.key.value.trim();
-    if (!key) { this.showError("请先填入 TypeSafe API Key（console.typesafe.ai/keys 获取）"); return; }
+    if (!key && this.provider !== "laya") { this.showError("请先填入 TypeSafe API Key（console.typesafe.ai/keys 获取）；本地 Laya 后端无需 key"); return; }
     localStorage.setItem("typesafe_api_key", key);
     this.clearError();
     this.running = true;
@@ -422,7 +456,7 @@ const JevPlayer = {
     this.agreeCount = 0; this.heuristicCount = 0; this.pieceMoves = 0;
     this.el.log.innerHTML = "";
     this.el.start.disabled = true; this.el.stop.disabled = false;
-    this.setBadge("Jev 玩家中", "on");
+    this.setBadge(this.playerName() + " 玩家中", "on");
     engine.setGravity(false);
     if (engine.over || !engine.started) engine.reset();
     engine.start(); engine.paused = false; hideOverlay();
@@ -506,7 +540,7 @@ const JevPlayer = {
       if (engine.over) { this.stop("游戏结束"); break; }
       if (this.mode() === "placement") {
         try {
-          this.setBadge("Jev 思考中…", "on");
+          this.setBadge(this.playerName() + " 思考中…", "on");
           const placements = enumeratePlacements(engine);
           if (!placements.length) { engine.applyAction("hard_drop"); continue; }
           const model = this.el.model.value.trim() || "jev-latest";
@@ -543,7 +577,7 @@ const JevPlayer = {
             top: ranked.slice(0, 3).map(([id, p]) => [id, p, fmtPlacement(byId.get(id))]),
             strategy: strategy || "–", health, fits, agree,
           });
-          this.setBadge("Jev 执行中", "on");
+          this.setBadge(this.playerName() + " 执行中", "on");
           await this.executePlacement(chosen);
           this.updateStats();
           if (engine.over) { this.stop("游戏结束"); break; }
@@ -558,7 +592,7 @@ const JevPlayer = {
         /* 模式 B：逐步动作（v1 实验对比） */
         if (this.pieceMoves >= 30) { engine.applyAction("hard_drop"); this.pieceMoves = 0; continue; }
         try {
-          this.setBadge("Jev 思考中…", "on");
+          this.setBadge(this.playerName() + " 思考中…", "on");
           const t0 = performance.now();
           const data = await this.askJev({
             state: engine.getStateText(),
@@ -589,7 +623,7 @@ const JevPlayer = {
             detail: "逐步动作模式", top: Object.entries(a.probabilities).sort((x, y) => y[1] - x[1]).slice(0, 3),
             strategy: "–", health: "–", fits: 0, agree: true,
           });
-          this.setBadge("Jev 执行中", "on");
+          this.setBadge(this.playerName() + " 执行中", "on");
           const r = engine.applyAction(a.choice);
           if (r.locked || !r.moved) this.pieceMoves = 0; else this.pieceMoves++;
           if (r.gameOver) { this.stop("游戏结束"); break; }

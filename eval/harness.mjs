@@ -13,6 +13,12 @@
  *    node eval/harness.mjs --player random --games 100
  *    TYPESAFE_API_KEY=sk-... node eval/harness.mjs --player jev --games 20 \
  *        [--model jev-latest] [--log eval/runs/jev-v2.jsonl] [--chain 1]
+ *    node eval/harness.mjs --player jev --url http://localhost:8788 --games 20 \
+ *        [--model laya-typed]                                        # 本地 Laya 后端（无需 key）
+ *
+ *  --url 决定后端（双后端同协议 /v1/systemone）：
+ *    https://api.typesafe.ai  Jev（默认，需 TYPESAFE_API_KEY）
+ *    http://localhost:8788    本地 Laya（laya-server.py，无需 key）
  *
  *  --chain 1 开启判断链实验（先 strategy 后落点两跳；2026-09-23 验证为回退，默认关闭）。
  *
@@ -27,7 +33,7 @@ import {
 } from "../engine.js";
 
 /* ---------- 参数 ---------- */
-const args = { player: "heuristic", games: 100, "seed-start": 0, "max-pieces": 500, model: "jev-latest", log: "", chain: "" };
+const args = { player: "heuristic", games: 100, "seed-start": 0, "max-pieces": 500, model: "jev-latest", log: "", chain: "", url: "https://api.typesafe.ai" };
 for (let i = 2; i < process.argv.length; i += 2) {
   const k = process.argv[i].replace(/^--/, "");
   if (!(k in args)) { console.error(`未知参数 --${k}`); process.exit(1); }
@@ -43,15 +49,20 @@ function heuristicDecide(engine, placements) {
 function randomDecideFactory(rng) {
   return (engine, placements) => placements[Math.floor(rng() * placements.length)];
 }
-// Jev API 调用（直连 api.typesafe.ai，429/529 与网络错误指数退避重试）
+// Jev / Laya API 调用（--url 决定后端，双后端同协议；429/529 与网络错误指数退避重试）
+const API_BASE = args.url.replace(/\/+$/, "");
+const IS_LOCAL = !/typesafe\.ai$/.test(new URL(API_BASE).host);
 async function askJev(body, key) {
   const maxRetry = 6;
   for (let attempt = 0; ; attempt++) {
     let resp;
     try {
-      resp = await fetch("https://api.typesafe.ai/v1/systemone", {
+      resp = await fetch(API_BASE + "/v1/systemone", {
         method: "POST",
-        headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
+        headers: {
+          ...(key ? { "Authorization": "Bearer " + key } : {}),
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(body),
       });
     } catch (err) {
@@ -105,6 +116,7 @@ function jevDecideFactory(key, model, log, chain) {
     const hBest = placements.reduce((b, p) => (p.heuristic > b.heuristic ? p : b), placements[0]);
     log?.write(JSON.stringify({
       ...ctx, ms: msStrategy + msPlacement, ...(chain ? { ms_strategy: msStrategy, ms_placement: msPlacement } : {}),
+      backend: IS_LOCAL ? "laya" : "jev", model,
       tokens: (d1 ? (d1.usage?.input_tokens || 0) + (d1.usage?.output_tokens || 0) : 0)
             + ((d2.usage?.input_tokens || 0) + (d2.usage?.output_tokens || 0)),
       piece: engine.cur.type, next: engine.nextType,
@@ -167,8 +179,8 @@ let decide;
 if (args.player === "heuristic") decide = heuristicDecide;
 else if (args.player === "random") { const rng = mulberry32(0xC0FFEE); decide = randomDecideFactory(rng); }
 else if (args.player === "jev") {
-  const key = process.env.TYPESAFE_API_KEY;
-  if (!key) { console.error("需要 TYPESAFE_API_KEY 环境变量"); process.exit(1); }
+  const key = process.env.TYPESAFE_API_KEY || "";
+  if (!key && !IS_LOCAL) { console.error("Jev 云端后端需要 TYPESAFE_API_KEY 环境变量（本地 Laya 后端用 --url http://localhost:8788，无需 key）"); process.exit(1); }
   decide = jevDecideFactory(key, args.model, log, !!args.chain);
 } else { console.error(`未知玩家 ${args.player}`); process.exit(1); }
 

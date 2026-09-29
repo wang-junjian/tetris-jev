@@ -1,8 +1,9 @@
 # Tetris × Jev
 
-Web 版俄罗斯方块，内置 **Jev**（TypeSafe System One）AI 玩家，让 AI 自己玩游戏；同时暴露 `window.TetrisAPI` 接口，任何外部智能体（Playwright / Puppeteer / LLM）都能驱动游戏。
+Web 俄罗斯方块，内置 **Jev**（TypeSafe System One）AI 玩家，让 AI 自己玩游戏；同时暴露 `window.TetrisAPI` 接口，任何外部智能体（Playwright / Puppeteer / LLM）都能驱动游戏。
 
 - 零依赖：`node jev-proxy.mjs` 一条命令同时托管页面和代理 API
+- **双后端**：Jev（云端 TypeSafe）与 **Laya**（本地开源决策模型）同协议可切换
 - 内置 Jev 玩家：每个方块一次 API 调用，从全部合法候选落点中做「品味判断」
 - 完整决策日志：概率分布、置信度、耗时、token、与经典启发式一致率
 - 固定种子评估工具：Node 批量对局，Jev / 启发式 / 随机同环境对照
@@ -28,6 +29,24 @@ TYPESAFE_API_KEY=sk-xxxx node jev-proxy.mjs 8787
 # 3. 点「▶ 启动 Jev 玩家」，观察决策日志
 ```
 
+### 后端二：本地 Laya（开源，离线可用）
+
+[Laya](https://huggingface.co/convaiinnovations/laya) 是 Jev 的开源对标模型（421M 双向编码器，Apache 2.0，choice/score/noul 同协议），单次前向推理，Mac MPS 即可运行。权重需先下载（HuggingFace 不可达时用 ModelScope 镜像，本仓库已按此路径部署到 `~/.workbuddy/models/laya/`）：
+
+```bash
+# 1. 启动本地推理服务（默认 typed-decisions checkpoint，1024 token 预算）
+<venv-python> laya-server.py 8788
+
+# 2. 浏览器打开 http://localhost:8788 —— 页面会探测 /v1/health 识别后端，
+#    显示「本地 Laya」，无需 API key
+
+# 3. 点「▶ 启动 Jev 玩家」，其余体验与 Jev 完全一致
+```
+
+> **开箱棋力提示**：Laya 基座对本项目的棋局表示没有判别力，实测只得几百分（同环境 Jev 为几万分），输出概率接近均匀分布。经三组受控实验定位——这不是接口问题，而是模型缺任务语义先验，唯有微调能解；次要因素是 `head_max_len` 预算会截断题干与候选文本。完整证据、已排除项与对策见 [docs/laya-why-weak.html](docs/laya-why-weak.html)。诊断脚本：`eval/laya_prompt_diag.py`、`eval/laya_abc_diag.py`。
+
+两个后端可随时切换（页面改 API 地址即可），决策日志与评估工具完全通用，便于同环境对照。
+
 ## 评估工具（固定种子批量对局）
 
 `engine.js` 是浏览器 / Node 共享的引擎模块，评估工具用它无头跑批量对局，种子固定、结果可复现，是所有改动的回归基准：
@@ -37,6 +56,8 @@ node eval/harness.mjs --player heuristic --games 100        # 启发式对照（
 node eval/harness.mjs --player random --games 100           # 随机对照
 TYPESAFE_API_KEY=sk-... node eval/harness.mjs --player jev --games 20 \
     --log eval/runs/jev-v2.jsonl                            # Jev + 决策日志（供失误诊断）
+node eval/harness.mjs --player jev --url http://localhost:8788 --model laya-typed \
+    --games 20 --log eval/runs/laya-v1.jsonl                # 本地 Laya（无需 key）
 ```
 
 当前基线（100 局固定种子，每局 500 块截断）：启发式平均消行 **193.9**（97 局打满截断），随机 **0**（平均存活 20 块）。Jev 基线待测。
@@ -94,12 +115,18 @@ while (!(await page.evaluate(() => TetrisAPI.getState().gameOver))) {
 ```
 ├── index.html                      # 页面：渲染 / 输入 / Jev 玩家 / TetrisAPI
 ├── engine.js                       # 共享引擎（浏览器 / Node 通用）：引擎 + 落点枚举 + 词化 + Jev 问题构造
-├── jev-proxy.mjs                   # 零依赖 Node 代理：CORS 转发 + 静态托管
+├── jev-proxy.mjs                   # 零依赖 Node 代理：CORS 转发 + 静态托管（Jev 云端后端）
+├── laya-server.py                  # 零依赖 Python 服务：本地 Laya 推理（/v1/systemone 协议兼容层）
+├── eval/laya_smoke.py              # Laya 本地部署冒烟测试
 ├── CONTEXT.md                      # 领域术语表（Jev 驱动 / 词化 / 对照玩家 / 劣招标注…）
 ├── eval/
-│   └── harness.mjs                 # 固定种子批量对局评估工具
+│   ├── harness.mjs                 # 固定种子批量对局评估工具
+│   ├── laya_prompt_diag.py         # Laya prompt 预算诊断（题干/选项被截断多少）
+│   └── laya_abc_diag.py            # Laya 棋力根因对照实验（A/B/C + 双 checkpoint）
 └── docs/
     ├── jev-development-guide.html  # 完整开发指南（浅色 HTML，可离线阅读）
+    ├── laya-best-practices.html    # Laya 本地部署与集成最佳实践（含实测数据与排错速查）
+    ├── laya-why-weak.html          # Laya 棋力根因诊断报告（三组受控实验）
     ├── adr/                        # 架构决策记录（0001: 决策路径禁止代码估值）
     └── assets/                     # demo.png / demo.mov / demo.mp4
 ```
