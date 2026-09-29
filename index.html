@@ -90,6 +90,11 @@
   .log .agree { color: #2c7a3f; font-weight: 700; }
   .log .disagree { color: #b06a00; }
   .log .empty { color: var(--muted); padding: 14px 12px; }
+  .log details.io { margin-top: 6px; }
+  .log details.io summary { cursor: pointer; color: var(--muted); font-size: 11px; user-select: none; }
+  .log details.io summary:hover { color: var(--ink); }
+  .log details.io h4 { font-size: 10px; font-weight: 800; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; margin: 8px 0 3px; }
+  .log details.io pre { background: #141414; color: #e8e6df; padding: 8px 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; font-size: 10.5px; line-height: 1.5; max-height: 280px; overflow-y: auto; }
 
   details.api { background: var(--panel); border: 2px solid var(--ink); }
   details.api summary { cursor: pointer; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; padding: 9px 12px; background: var(--ink); color: #fff; }
@@ -503,6 +508,14 @@ const JevPlayer = {
       `<div class="bar"><span class="name" title="${label || name}">${label || name}</span>
        <span class="track"><span class="fill ${name === entry.chosen ? "top" : ""}" style="width:${Math.round(p * 100)}%"></span></span>
        <span class="pct">${Math.round(p * 100)}%</span></div>`).join("");
+    // 模型输入/输出原始记录：每跳（判断链有两跳）各一段请求 + 响应 JSON，
+    // 让人能直接看到 Jev 读到了什么词化输入、返回了什么判断。
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const ioHtml = (entry.io || []).map(h =>
+      `<h4>${esc(h.label)} · 输入（发给模型的 state + questions）</h4>
+       <pre>${esc(JSON.stringify(h.request, null, 2))}</pre>
+       <h4>${esc(h.label)} · 输出（模型返回的 answers）</h4>
+       <pre>${esc(JSON.stringify(h.response, null, 2))}</pre>`).join("");
     div.innerHTML = `
       <div class="top">
         <span class="no">#${entry.no}</span>
@@ -512,7 +525,8 @@ const JevPlayer = {
       <div class="sub">${entry.detail}</div>
       <div class="bars">${bars}</div>
       <div class="sub">${entry.strategy} · health ${entry.health} · next fits ${(entry.fits * 100).toFixed(0)}%
-        · <span class="${entry.agree ? "agree" : "disagree"}">${entry.agree ? "与启发式一致" : "与启发式不同"}</span></div>`;
+        · <span class="${entry.agree ? "agree" : "disagree"}">${entry.agree ? "与启发式一致" : "与启发式不同"}</span></div>
+      ${ioHtml ? `<details class="io"><summary>模型输入 / 输出（原始 JSON）</summary>${ioHtml}</details>` : ""}`;
     this.el.log.prepend(div);
     while (this.el.log.children.length > 30) this.el.log.lastChild.remove();
   },
@@ -546,15 +560,21 @@ const JevPlayer = {
           const model = this.el.model.value.trim() || "jev-latest";
           const chain = this.el.chain.checked;
           const t0 = performance.now();
+          // 记录每次调用的请求/响应，供日志展开查看模型的完整输入与输出
+          const io = [];
           // 判断链第一跳（实验）：strategy（board_health / next_piece_fits 投机问题随附）
           let d1 = null, strategy;
           if (chain) {
-            d1 = await this.askJev({ state: buildState(engine), model, questions: buildStrategyQuestions() });
+            const body1 = { state: buildState(engine), model, questions: buildStrategyQuestions() };
+            d1 = await this.askJev(body1);
+            io.push({ label: "第 1 跳 · strategy", request: body1, response: d1 });
             strategy = d1.answers.strategy?.choice;
           }
           // 第二跳（判断链）/ 唯一一跳（默认）：placement
           const state = buildState(engine, { strategy: strategy ? `${strategy}: ${STRATEGY_OPTIONS[strategy]}` : undefined });
-          const d2 = await this.askJev({ state, model, questions: chain ? buildPlacementQuestions(placements) : buildQuestions(placements) });
+          const body2 = { state, model, questions: chain ? buildPlacementQuestions(placements) : buildQuestions(placements) };
+          const d2 = await this.askJev(body2);
+          io.push({ label: chain ? "第 2 跳 · placement" : "placement 决策（单请求）", request: body2, response: d2 });
           const ms = Math.round(performance.now() - t0);
           const a = d2.answers.placement;
           const byId = new Map(placements.map(p => [p.id, p]));
@@ -575,7 +595,7 @@ const JevPlayer = {
             no: this.decisions, chosen: fmtPlacement(chosen), confidence: a.confidence, ms, tok,
             detail: `候选 ${placements.length} 个 · ${cd.height_change} · surface ${cd.surface_after}`,
             top: ranked.slice(0, 3).map(([id, p]) => [id, p, fmtPlacement(byId.get(id))]),
-            strategy: strategy || "–", health, fits, agree,
+            strategy: strategy || "–", health, fits, agree, io,
           });
           this.setBadge(this.playerName() + " 执行中", "on");
           await this.executePlacement(chosen);
@@ -594,7 +614,7 @@ const JevPlayer = {
         try {
           this.setBadge(this.playerName() + " 思考中…", "on");
           const t0 = performance.now();
-          const data = await this.askJev({
+          const stepBody = {
             state: engine.getStateText(),
             model: this.el.model.value.trim() || "jev-latest",
             questions: {
@@ -613,7 +633,8 @@ const JevPlayer = {
                 },
               },
             },
-          });
+          };
+          const data = await this.askJev(stepBody);
           const ms = Math.round(performance.now() - t0);
           const a = data.answers.action;
           const tok = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
@@ -622,6 +643,7 @@ const JevPlayer = {
             no: this.decisions, chosen: a.choice, confidence: a.confidence, ms, tok,
             detail: "逐步动作模式", top: Object.entries(a.probabilities).sort((x, y) => y[1] - x[1]).slice(0, 3),
             strategy: "–", health: "–", fits: 0, agree: true,
+            io: [{ label: "action 决策", request: stepBody, response: data }],
           });
           this.setBadge(this.playerName() + " 执行中", "on");
           const r = engine.applyAction(a.choice);
