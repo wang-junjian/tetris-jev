@@ -82,6 +82,8 @@ node eval/harness.mjs --player jev --url http://localhost:8788 --model laya-type
 
 核心经验：**代码玩游戏，Jev 做判断** —— 枚举、模拟、执行全部交给代码，Jev 只在已算好的选项之间做价值判断。详细技术细节见 [docs/jev-development-guide.html](docs/jev-development-guide.html)。
 
+> 把本项目放回论文《Jev in the Wild》的坐标系看：它落在「仿真与控制」领域，而该领域 52% 的目的标签是动作选择——八个领域里最高；同时它三个接口全用（落点判断 Choice、`board_health`/`next_piece_fits` Noul、`strategy` Score），正落在「三接口齐用」那 36.8% 里。两代提示词的对照也印证了论文第九节的「规律一」：**功能随工作流而变**。完整解读见 [docs/jev-in-the-wild-panorama.html](docs/jev-in-the-wild-panorama.html)。
+
 ## 智能体接口 `window.TetrisAPI`
 
 ```js
@@ -125,6 +127,7 @@ while (!(await page.evaluate(() => TetrisAPI.getState().gameOver))) {
 │   └── laya_abc_diag.py            # Laya 棋力根因对照实验（A/B/C + 双 checkpoint）
 └── docs/
     ├── jev-development-guide.html  # 完整开发指南（浅色 HTML，可离线阅读）
+    ├── jev-in-the-wild-panorama.html  # 论文《Jev in the Wild》解读：Jev 生态全景（9 张手写 SVG 图表）
     ├── laya-best-practices.html    # Laya 本地部署与集成最佳实践（含实测数据与排错速查）
     ├── laya-why-weak.html          # Laya 棋力根因诊断报告（三组受控实验）
     ├── adr/                        # 架构决策记录（0001: 决策路径禁止代码估值）
