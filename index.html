@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:,">
 <title>Tetris × Jev — AI 自己玩的俄罗斯方块</title>
 <style>
   :root {
@@ -53,8 +54,11 @@
   .form-grid label { font-size: 12px; font-weight: 700; color: var(--muted); }
   .form-grid input[type="text"], .form-grid input[type="password"] { font: 13px var(--mono); width: 100%; padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 4px; background: #fbfaf6; color: var(--ink); }
   .form-grid input:focus { outline: none; border-color: var(--ink); }
-  .mode-row { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 13px; }
-  .mode-row .mode-title { font-size: 12px; font-weight: 700; color: var(--muted); }
+  .local-row { display: flex; gap: 7px; align-items: baseline; margin-top: 12px; padding: 7px 9px; border: 1.5px dashed var(--line); border-radius: 4px; background: #fbfaf6; font-size: 13px; cursor: pointer; }
+  .local-row b { font-weight: 700; }
+  .local-row small { display: block; color: var(--muted); font-size: 11.5px; }
+  .form-grid input:disabled { background: #f1efe8; color: #a5a19a; }
+  .mode-row { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 13px; }  .mode-row .mode-title { font-size: 12px; font-weight: 700; color: var(--muted); }
   .mode-row label { display: flex; gap: 6px; align-items: baseline; cursor: pointer; }
   .mode-row label b { font-weight: 700; }
   .mode-row small { color: var(--muted); }
@@ -105,6 +109,25 @@
   details.api th, details.api td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; font-size: 12px; }
   details.api th { background: #f0eee7; }
   footer { max-width: 1180px; margin: 26px auto 0; color: var(--muted); font-size: 12px; border-top: 1.5px solid var(--line); padding-top: 12px; }
+  footer a { color: var(--muted); }
+
+  /* 窄屏（手机）：棋盘与面板改为竖排。GitHub Pages 上手机访问是常态，
+     而桌面布局的 .panel{min-width:400px} 在 375px 视口下会把整页撑到 860px。 */
+  @media (max-width: 720px) {
+    body { padding: 0 14px 32px; }
+    header { flex-wrap: wrap; row-gap: 8px; }
+    header .badge { margin-left: 0; }
+    .layout { flex-direction: column; align-items: stretch; }
+    .board-col { flex-direction: column; align-items: stretch; gap: 12px; }
+    /* canvas 的显示尺寸由脚本内联写在 style 上，只能用 !important 让位给窄屏 */
+    .board-wrap { width: 100%; max-width: 380px; margin: 0 auto; }
+    .board-wrap canvas#board { width: 100% !important; height: auto !important; }
+    .side { flex-direction: row; width: auto; gap: 8px; }
+    .side .next-box { flex: 0 0 auto; }
+    .side .stat { flex: 1 1 0; }
+    .panel { min-width: 0; max-width: none; }
+    .form-grid { grid-template-columns: 76px 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -122,7 +145,7 @@
       <canvas id="board" width="260" height="520"></canvas>
       <div class="overlay" id="overlay">
         <div class="big" id="overlayTitle">TETRIS</div>
-        <div class="hint" id="overlayHint">按任意方向键开始 · 或让 Jev 替你玩</div>
+        <div class="hint" id="overlayHint">点击开始游戏 · 或让 AI 替你玩</div>
         <button id="overlayBtn">开始游戏</button>
       </div>
     </div>
@@ -141,7 +164,7 @@
   <div class="panel">
 
     <div class="block">
-      <h2>Jev AI 玩家</h2>
+      <h2>AI 玩家</h2>
       <div class="body">
         <div class="form-grid">
           <label for="apiKey">API Key</label>
@@ -155,6 +178,11 @@
           <label for="interval">动作间隔</label>
           <input type="text" id="interval" value="120">
         </div>
+        <!-- 静态托管的默认后端：不联网、不需要 key，纯前端跑 engine.js 的启发式。
+             按 ADR 0001，启发式只作对照玩家，不进 Jev 的决策路径 —— 这里它是一个
+             独立玩家（页面徽章标明「启发式」），不与 Jev 的判断混算。 -->
+        <label class="local-row"><input type="checkbox" id="useLocal" checked>
+          <span><b>本地启发式</b><small>对照玩家（Dellacherie 权重）· 零网络零 Key · 静态站点的开箱玩法；取消勾选才走后端 API（Jev / Laya）</small></span></label>
         <div class="mode-row">
           <span class="mode-title">AI 决策模式</span>
           <label><input type="radio" name="aimode" value="placement" checked>
@@ -183,8 +211,8 @@
     </div>
 
     <div class="block">
-      <h2>Jev 决策日志</h2>
-      <div class="log" id="log"><div class="empty">启动 Jev 玩家后，这里显示每个方块的落点决策：候选概率分布、策略判断、棋盘健康度、与经典启发式的对照。</div></div>
+      <h2>决策日志</h2>
+      <div class="log" id="log"><div class="empty">启动 AI 玩家后，这里显示每个方块的落点决策：候选分布（或启发式得分）、策略判断、棋盘健康度、与经典启发式的对照。</div></div>
     </div>
 
     <div class="block">
@@ -235,6 +263,7 @@ while (!(await page.evaluate(() => TetrisAPI.getState().gameOver))) {
 
 <footer>
   设计参考 trungdq88/jev-tetris（Jev 官方生态验证过的玩法）：代码枚举全部合法落点并模拟结果，把数字转成文字（Jev 读文本强于算术），一个请求并行携带 placement Choice + strategy/board_health/next_piece_fits 投机问题；「判断链」（先 strategy 后落点两跳）为实验开关，已验证为回退，仅作对照。官方 API 不允许浏览器直连（CORS 白名单），先运行 <code>node jev-proxy.mjs 8787</code>。
+  <p style="margin-top:8px"><b>本地启发式</b>（静态托管下默认开启）：不联网、不需要 Key，直接用 <code>engine.js</code> 的 Dellacherie 权重从全部合法落点里贪心选择 —— 纯静态站点（GitHub Pages）的开箱玩法；取消勾选才走后端 API。调研报告见 <a href="docs/">docs/</a>。</p>
 </footer>
 
 <script type="module">
@@ -388,6 +417,7 @@ const JevPlayer = {
     providerTag: document.getElementById("providerTag"),
     interval: document.getElementById("interval"),
     chain: document.getElementById("chain"),
+    useLocal: document.getElementById("useLocal"),
     start: document.getElementById("aiStart"),
     stop: document.getElementById("aiStop"),
     err: document.getElementById("errbox"),
@@ -402,11 +432,22 @@ const JevPlayer = {
   init() {
     this.el.key.value = localStorage.getItem("typesafe_api_key") || "";
     this.el.baseUrl.value = localStorage.getItem("jev_base_url") || this.el.baseUrl.value;
+    /* 本地启发式开关的默认值：静态托管（非 localhost 访问，如 GitHub Pages）默认开启，
+       本地开发沿用上次选择；显式存过就一律以存储为准。 */
+    const savedLocal = localStorage.getItem("jev_use_local");
+    const isDev = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    this.el.useLocal.checked = savedLocal === null ? !isDev : savedLocal === "1";
+    this.el.useLocal.addEventListener("change", () => {
+      localStorage.setItem("jev_use_local", this.el.useLocal.checked ? "1" : "0");
+      this.applyLocalUI();
+      this.probeProvider();
+    });
     this.el.key.addEventListener("change", () => localStorage.setItem("typesafe_api_key", this.el.key.value.trim()));
     this.el.baseUrl.addEventListener("change", () => {
       localStorage.setItem("jev_base_url", this.el.baseUrl.value.trim());
       this.probeProvider();
     });
+    this.applyLocalUI();
     this.probeProvider();
     this.el.start.addEventListener("click", () => this.start());
     this.el.stop.addEventListener("click", () => this.stop("已手动停止"));
@@ -416,10 +457,36 @@ const JevPlayer = {
      双后端同协议（POST /v1/systemone），探测只影响 key 是否必填、提示文案与默认模型名。
      探测失败按 Jev 处理，不影响原有用法。 */
   provider: "jev",
+  isLocal() { return this.el.useLocal.checked; },
+
+  /* 本地启发式开关联动的 UI：本地模式下 key / 模型 / 地址与两种联网模式不可用，
+     按钮与徽章文案随之切换 —— 避免「选了本地却提示填 Key」这类自相矛盾的界面。 */
+  applyLocalUI() {
+    const on = this.isLocal();
+    for (const k of ["key", "model", "baseUrl"]) this.el[k].disabled = on;
+    const stepRadio = document.querySelector('input[name="aimode"][value="step"]');
+    if (stepRadio) stepRadio.disabled = on;
+    if (on) {
+      document.querySelector('input[name="aimode"][value="placement"]').checked = true;
+      this.el.chain.checked = false;
+    }
+    this.el.chain.disabled = on;
+    this.el.start.textContent = this.isLocal() ? "▶ 启动启发式玩家" : `▶ 启动 ${this.playerName()} 玩家`;
+    this.el.start.disabled = this.running;
+    this.clearError();
+  },
+
   async probeProvider() {
-    const base = this.el.baseUrl.value.trim().replace(/\/+$/, "");
     const tag = this.el.providerTag;
     const setTag = (text, color) => { tag.textContent = text; tag.style.color = color; };
+    /* 本地启发式不探测网络：它跑在页面里，不存在「不可达」这回事。 */
+    if (this.isLocal()) {
+      this.provider = "local";
+      setTag("本地启发式（无需后端）", "#1a7f37");
+      if (this.running) this.setBadge(this.playerName() + " 玩家中", "on");
+      return;
+    }
+    const base = this.el.baseUrl.value.trim().replace(/\/+$/, "");
     try {
       const resp = await fetch(base + "/v1/health", { signal: AbortSignal.timeout(1500) });
       const info = await resp.json();
@@ -437,8 +504,8 @@ const JevPlayer = {
     setTag("Jev (TypeSafe)", "#6b675f");
   },
   mode() { return document.querySelector('input[name="aimode"]:checked').value; },
-  /* 徽章文案跟随后端：本地 Laya 显示 Laya，否则 Jev */
-  playerName() { return this.provider === "laya" ? "Laya" : "Jev"; },
+  /* 徽章文案跟随后端：本地启发式（对照玩家）/ 本地 Laya / Jev 云端 */
+  playerName() { return this.isLocal() ? "启发式" : this.provider === "laya" ? "Laya" : "Jev"; },
 
   setBadge(text, cls) { this.el.badge.textContent = text; this.el.badge.className = "badge" + (cls ? " " + cls : ""); },
   showError(msg) { this.el.err.textContent = msg; this.el.err.classList.add("show"); this.setBadge("错误", "err"); },
@@ -453,7 +520,7 @@ const JevPlayer = {
   async start() {
     if (this.running) return;
     const key = this.el.key.value.trim();
-    if (!key && this.provider !== "laya") { this.showError("请先填入 TypeSafe API Key（console.typesafe.ai/keys 获取）；本地 Laya 后端无需 key"); return; }
+    if (!this.isLocal() && !key && this.provider !== "laya") { this.showError("请先填入 TypeSafe API Key（console.typesafe.ai/keys 获取）；本地 Laya 后端无需 key；或勾选「本地启发式」纯前端运行"); return; }
     localStorage.setItem("typesafe_api_key", key);
     this.clearError();
     this.running = true;
@@ -504,10 +571,12 @@ const JevPlayer = {
     if (empty) empty.remove();
     const div = document.createElement("div");
     div.className = "entry";
-    const bars = entry.top.map(([name, p, label]) =>
-      `<div class="bar"><span class="name" title="${label || name}">${label || name}</span>
+    const bars = entry.top.length
+      ? `<div class="bars">${entry.top.map(([name, p, label]) =>
+          `<div class="bar"><span class="name" title="${label || name}">${label || name}</span>
        <span class="track"><span class="fill ${name === entry.chosen ? "top" : ""}" style="width:${Math.round(p * 100)}%"></span></span>
-       <span class="pct">${Math.round(p * 100)}%</span></div>`).join("");
+       <span class="pct">${Math.round(p * 100)}%</span></div>`).join("")}</div>`
+      : "";
     // 模型输入/输出原始记录：每跳（判断链有两跳）各一段请求 + 响应 JSON，
     // 让人能直接看到 Jev 读到了什么词化输入、返回了什么判断。
     const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -520,11 +589,11 @@ const JevPlayer = {
       <div class="top">
         <span class="no">#${entry.no}</span>
         <span class="act">${entry.chosen}</span>
-        <span class="meta">conf ${(entry.confidence * 100).toFixed(0)}% · ${entry.ms}ms · ${entry.tok}tok</span>
+        <span class="meta">${entry.confidence == null ? "确定性" : "conf " + (entry.confidence * 100).toFixed(0) + "%"} · ${entry.ms}ms${entry.tok ? ` · ${entry.tok}tok` : ""}</span>
       </div>
       <div class="sub">${entry.detail}</div>
-      <div class="bars">${bars}</div>
-      <div class="sub">${entry.strategy} · health ${entry.health} · next fits ${(entry.fits * 100).toFixed(0)}%
+      ${bars}
+      <div class="sub">${entry.strategy} · health ${entry.health} · next fits ${entry.fits == null ? "–" : (entry.fits * 100).toFixed(0) + "%"}
         · <span class="${entry.agree ? "agree" : "disagree"}">${entry.agree ? "与启发式一致" : "与启发式不同"}</span></div>
       ${ioHtml ? `<details class="io"><summary>模型输入 / 输出（原始 JSON）</summary>${ioHtml}</details>` : ""}`;
     this.el.log.prepend(div);
@@ -557,6 +626,27 @@ const JevPlayer = {
           this.setBadge(this.playerName() + " 思考中…", "on");
           const placements = enumeratePlacements(engine);
           if (!placements.length) { engine.applyAction("hard_drop"); continue; }
+          /* 本地启发式：与 Jev 走同一条落点路径，只是判断由 engine.js 的
+             heuristicScore 给出（Dellacherie 权重，分越高越好）。零网络、毫秒级。 */
+          if (this.isLocal()) {
+            const t0 = performance.now();
+            const rankedP = [...placements].sort((a, b) => b.heuristic - a.heuristic);
+            const chosen = rankedP[0];
+            const ms = Math.max(1, Math.round(performance.now() - t0));
+            this.decisions++; this.latSum += ms; this.heuristicCount++; this.agreeCount++;
+            const cd = describePlacement(chosen);
+            this.appendLog({
+              no: this.decisions, chosen: fmtPlacement(chosen), confidence: null, ms, tok: 0,
+              detail: `候选 ${placements.length} 个 · 贪心取最高分 ${chosen.heuristic.toFixed(1)}（Dellacherie 权重）· ${cd.height_change} · surface ${cd.surface_after}`,
+              top: [], strategy: "–", health: "–", fits: null, agree: true, io: [],
+            });
+            this.setBadge(this.playerName() + " 执行中", "on");
+            await this.executePlacement(chosen);
+            this.updateStats();
+            if (engine.over) { this.stop("游戏结束"); break; }
+            await delay(interval());
+            continue;
+          }
           const model = this.el.model.value.trim() || "jev-latest";
           const chain = this.el.chain.checked;
           const t0 = performance.now();

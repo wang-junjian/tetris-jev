@@ -1,0 +1,56 @@
+name: Deploy playable demo
+
+# 本项目没有构建步骤：Pages 的产物就是仓库里的文件本身。
+# 因此工作流的价值不在「生成」，而在「发布前把该验的验一遍」——
+# 引用能否解析、内联脚本能否解析、引擎行为有没有漂。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时刻只允许一个部署在跑，且不取消进行中的部署（避免站点短暂空档）。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 引擎回归门禁：页面与评估工具共用 engine.js，改页面时顺手改了引擎，
+      # 这里会立刻现形（启发式基线 20 局，耗时约 2 秒）。
+      - name: Engine regression (heuristic baseline)
+        run: node eval/harness.mjs --player heuristic --games 20
+
+      - name: Assemble static site
+        run: bash eval/build-site.sh
+
+      # 静态断言：必需文件、全部本地引用可解析、无 file:// / 明文 http、
+      # 内联 module 脚本语法、engine.js 可导入并导出 Engine/enumeratePlacements。
+      - name: Site self-check
+        run: node eval/check-site.mjs --dir site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
