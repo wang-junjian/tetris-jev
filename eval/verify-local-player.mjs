@@ -16,6 +16,7 @@
  *
  *  用法：
  *    node eval/verify-local-player.mjs [--dir site] [--shots eval/shots] [--hold 5000]
+ *    node eval/verify-local-player.mjs --url https://wangjunjian.com/tetris-jev/   # 线上验收
  * ================================================================ */
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -36,8 +37,10 @@ const shotDir = path.resolve(arg("--shots", "eval/shots"));
 const holdMs = Number(arg("--hold", "5000"));
 const CHROME = arg("--chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
 const HOST = "tetris.test";
+/* --url 模式直连已部署的站点：此时不需要本地服务器，也不该启动它 */
+const remote = arg("--url", "").replace(/\/+$/, "");
 
-if (!existsSync(path.join(root, "index.html"))) {
+if (!remote && !existsSync(path.join(root, "index.html"))) {
   console.error(`✗ ${root} 下没有 index.html，先 bash eval/build-site.sh`);
   process.exit(1);
 }
@@ -47,19 +50,22 @@ const MIME = {
   ".css": "text/css", ".png": "image/png", ".mp4": "video/mp4", ".txt": "text/plain",
 };
 
-const server = createServer(async (req, res) => {
-  try {
-    const urlPath = decodeURIComponent(req.url.split("?")[0]);
-    let file = path.join(root, urlPath);
-    if (urlPath.endsWith("/")) file = path.join(file, "index.html");
-    const body = await readFile(file);
-    res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream" });
-    res.end(body);
-  } catch {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("not found");
-  }
-});
+let server = null;
+if (!remote) {
+  server = createServer(async (req, res) => {
+    try {
+      const urlPath = decodeURIComponent(req.url.split("?")[0]);
+      let file = path.join(root, urlPath);
+      if (urlPath.endsWith("/")) file = path.join(file, "index.html");
+      const body = await readFile(file);
+      res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream" });
+      res.end(body);
+    } catch {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("not found");
+    }
+  });
+}
 
 const problems = [];
 const pass = [];
@@ -67,8 +73,13 @@ const ok = (m) => pass.push(m);
 const bad = (m) => problems.push(m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-await new Promise((r) => server.listen(0, "127.0.0.1", r));
-const port = server.address().port;
+let port = 0;
+if (server) await new Promise((r) => server.listen(0, "127.0.0.1", r));
+if (server) port = server.address().port;
+/* 线上模式直连 URL；本地模式靠 host-resolver 把 tetris.test 指到 127.0.0.1，
+   目的是让 location.hostname 不是 localhost —— 否则会走本地开发分支，白测 */
+const origin = remote || `http://${HOST}:${port}`;
+const shot = (name) => path.join(shotDir, (remote ? "online-" : "") + name);
 mkdirSync(shotDir, { recursive: true });
 
 const browser = await puppeteer.launch({
@@ -95,7 +106,7 @@ try {
     if (r.status() >= 400) errors.push(`[${phase}] HTTP ${r.status()}: ${r.url()}`);
   });
 
-  await page.goto(`http://${HOST}:${port}/index.html`, { waitUntil: "networkidle2" });
+  await page.goto(`${origin}/index.html`, { waitUntil: "networkidle2" });
   await sleep(600);
 
   /* ---------- A. 默认后端应为本地启发式 ---------- */
@@ -125,7 +136,7 @@ try {
   if (/启发式/.test(initial.startText)) ok(`按钮文案：「${initial.startText}」`);
   else bad(`按钮文案未跟随后端：「${initial.startText}」`);
 
-  await page.screenshot({ path: path.join(shotDir, "initial.png") });
+  await page.screenshot({ path: shot("initial.png") });
 
   /* ---------- B. 点下去要真的动 ---------- */
   await page.click("#aiStart");
@@ -166,7 +177,7 @@ try {
   if (running.lines > 0) ok(`已消行 ${running.lines} 行，得分 ${running.score}`);
   else ok(`暂未消行（${holdMs}ms 内正常），得分 ${running.score}`);
 
-  await page.screenshot({ path: path.join(shotDir, "running.png") });
+  await page.screenshot({ path: shot("running.png") });
 
   /* ---------- C. 取消勾选应回到后端模式 ---------- */
   phase = "C";
@@ -192,7 +203,7 @@ try {
 
   /* ---------- D. 文档索引页可加载 ---------- */
   phase = "D";
-  await page.goto(`http://${HOST}:${port}/docs/index.html`, { waitUntil: "networkidle2" });
+  await page.goto(`${origin}/docs/index.html`, { waitUntil: "networkidle2" });
   await sleep(400);
   const docs = await page.evaluate(() => ({
     title: document.querySelector("h1")?.textContent.trim(),
@@ -201,9 +212,9 @@ try {
   }));
   if (docs.cards >= 6) ok(`文档索引页：${docs.cards} 张卡片，标题「${docs.title}」`);
   else bad(`文档索引页卡片只有 ${docs.cards} 张`);
-  await page.screenshot({ path: path.join(shotDir, "docs-index.png"), fullPage: true });
+  await page.screenshot({ path: shot("docs-index.png"), fullPage: true });
 
-  await page.goto(`http://${HOST}:${port}/index.html`, { waitUntil: "networkidle2" });
+  await page.goto(`${origin}/index.html`, { waitUntil: "networkidle2" });
   const backOk = await page.evaluate(() => !!document.getElementById("board"));
   if (backOk) ok("从索引页回到游戏页正常");
   else bad("从索引页回到游戏页失败");
@@ -211,7 +222,7 @@ try {
   /* ---------- E. 窄视口（375px）不能横向溢出 ---------- */
   phase = "E";
   await page.setViewport({ width: 375, height: 812, deviceScaleFactor: 2 });
-  await page.goto(`http://${HOST}:${port}/index.html`, { waitUntil: "networkidle2" });
+  await page.goto(`${origin}/index.html`, { waitUntil: "networkidle2" });
   await sleep(600);
   const narrow = await page.evaluate(() => {
     const doc = document.documentElement;
@@ -233,7 +244,7 @@ try {
   });
   if (narrow.scrollW <= narrow.vw + 2) ok(`375px 视口无横向溢出（scrollWidth ${narrow.scrollW} ≤ ${narrow.vw}）`);
   else bad(`375px 视口横向溢出：scrollWidth ${narrow.scrollW} > ${narrow.vw}，撑破元素 ${narrow.spill.join(" | ") || "(未定位)"}`);
-  await page.screenshot({ path: path.join(shotDir, "mobile.png"), fullPage: false });
+  await page.screenshot({ path: shot("mobile.png"), fullPage: false });
 
   /* ---------- 汇总 ---------- */
   /* A/B 是「纯静态托管下的开箱体验」，它必须零噪音：任何报错都是真问题。
@@ -248,7 +259,7 @@ try {
   for (const e of expected) bad(`C/D 阶段出现预期外错误：${e}`);
 } finally {
   await browser.close();
-  server.close();
+  server?.close();
 }
 
 console.log(`\n${problems.length ? "✗" : "✓"} 浏览器验证：${pass.length} 项通过，${problems.length} 项失败`);

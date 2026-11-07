@@ -10,17 +10,23 @@ Web 俄罗斯方块，内置 **Jev**（TypeSafe System One）AI 玩家，让 AI 
 
 ## 在线试玩
 
-**<https://wang-junjian.github.io/tetris-jev/>** —— GitHub Pages 纯静态托管，无需安装、无需 API Key。
+**<https://wangjunjian.com/tetris-jev/>** —— GitHub Pages 纯静态托管，无需安装、无需 API Key。
+（`https://wang-junjian.github.io/tetris-jev/` 会 301 到同一站点。）
 
 静态站点上没有后端，因此页面默认启用**本地启发式玩家**（对照玩家，Dellacherie 权重，跑在浏览器里，零网络零 Key）；取消勾选后才请求 `/v1/systemone`，需要自备 https 的代理地址。按 ADR 0001，启发式只作对照，不进 Jev 的决策路径——在页面里它就是另一个玩家，徽章会标明「启发式」。
 
-调研报告索引：<https://wang-junjian.github.io/tetris-jev/docs/>
+调研报告索引：<https://wangjunjian.com/tetris-jev/docs/>
 
 部署方式与本地一致，一条命令组装 + 一次自检：
 
 ```bash
 bash eval/build-site.sh      # 只挑出要公开的文件，不做任何转换
 node eval/check-site.mjs     # 引用可解析 / 内联脚本语法 / 引擎可导入
+
+# 需要真实浏览器（可选，依赖 puppeteer-core）：本地或线上都能验
+NODE_PATH=<puppeteer-core 所在 node_modules> node eval/verify-local-player.mjs
+NODE_PATH=<puppeteer-core 所在 node_modules> node eval/verify-local-player.mjs \
+    --url https://wangjunjian.com/tetris-jev/
 ```
 
 推送 `main` 后由 `.github/workflows/pages.yml` 跑引擎回归 + 上述自检再发布。

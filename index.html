@@ -637,7 +637,7 @@ const JevPlayer = {
             const cd = describePlacement(chosen);
             this.appendLog({
               no: this.decisions, chosen: fmtPlacement(chosen), confidence: null, ms, tok: 0,
-              detail: `候选 ${placements.length} 个 · 贪心取最高分 ${chosen.heuristic.toFixed(1)}（Dellacherie 权重）· ${cd.height_change} · surface ${cd.surface_after}`,
+              detail: `候选 ${placements.length} 个 · 贪心取最高启发式分 ${chosen.heuristic.toFixed(1)}（越高越好，Dellacherie 权重）· ${cd.height_change} · surface ${cd.surface_after}`,
               top: [], strategy: "–", health: "–", fits: null, agree: true, io: [],
             });
             this.setBadge(this.playerName() + " 执行中", "on");
