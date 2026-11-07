@@ -8,6 +8,23 @@ Web 俄罗斯方块，内置 **Jev**（TypeSafe System One）AI 玩家，让 AI 
 - 完整决策日志：概率分布、置信度、耗时、token、与经典启发式一致率
 - 固定种子评估工具：Node 批量对局，Jev / 启发式 / 随机同环境对照
 
+## 在线试玩
+
+**<https://wang-junjian.github.io/tetris-jev/>** —— GitHub Pages 纯静态托管，无需安装、无需 API Key。
+
+静态站点上没有后端，因此页面默认启用**本地启发式玩家**（对照玩家，Dellacherie 权重，跑在浏览器里，零网络零 Key）；取消勾选后才请求 `/v1/systemone`，需要自备 https 的代理地址。按 ADR 0001，启发式只作对照，不进 Jev 的决策路径——在页面里它就是另一个玩家，徽章会标明「启发式」。
+
+调研报告索引：<https://wang-junjian.github.io/tetris-jev/docs/>
+
+部署方式与本地一致，一条命令组装 + 一次自检：
+
+```bash
+bash eval/build-site.sh      # 只挑出要公开的文件，不做任何转换
+node eval/check-site.mjs     # 引用可解析 / 内联脚本语法 / 引擎可导入
+```
+
+推送 `main` 后由 `.github/workflows/pages.yml` 跑引擎回归 + 上述自检再发布。
+
 ## 演示
 
 ![Tetris × Jev 演示截图](docs/assets/demo.png)
@@ -115,17 +132,22 @@ while (!(await page.evaluate(() => TetrisAPI.getState().gameOver))) {
 ## 项目结构
 
 ```
-├── index.html                      # 页面：渲染 / 输入 / Jev 玩家 / TetrisAPI
+├── index.html                      # 页面：渲染 / 输入 / AI 玩家（Jev / Laya / 本地启发式）/ TetrisAPI
 ├── engine.js                       # 共享引擎（浏览器 / Node 通用）：引擎 + 落点枚举 + 词化 + Jev 问题构造
 ├── jev-proxy.mjs                   # 零依赖 Node 代理：CORS 转发 + 静态托管（Jev 云端后端）
 ├── laya-server.py                  # 零依赖 Python 服务：本地 Laya 推理（/v1/systemone 协议兼容层）
 ├── eval/laya_smoke.py              # Laya 本地部署冒烟测试
 ├── CONTEXT.md                      # 领域术语表（Jev 驱动 / 词化 / 对照玩家 / 劣招标注…）
+├── .github/workflows/pages.yml     # Pages 发布：引擎回归 → 组装 site/ → 自检 → 部署
 ├── eval/
 │   ├── harness.mjs                 # 固定种子批量对局评估工具
+│   ├── build-site.sh               # 组装 Pages 站点（只挑要公开的文件，不做转换）
+│   ├── check-site.mjs              # 站点自检：引用可解析 / 内联脚本语法 / 引擎可导入
+│   ├── verify-local-player.mjs     # 真实浏览器验证（需 puppeteer-core）：静态托管下玩家能否跑起来
 │   ├── laya_prompt_diag.py         # Laya prompt 预算诊断（题干/选项被截断多少）
 │   └── laya_abc_diag.py            # Laya 棋力根因对照实验（A/B/C + 双 checkpoint）
 └── docs/
+    ├── index.html                  # 调研报告索引（Pages 上的 /docs/ 首页）
     ├── jev-development-guide.html  # 完整开发指南（浅色 HTML，可离线阅读）
     ├── jev-in-the-wild-panorama.html  # 论文《Jev in the Wild》解读：Jev 生态全景（9 张手写 SVG 图表）
     ├── laya-best-practices.html    # Laya 本地部署与集成最佳实践（含实测数据与排错速查）

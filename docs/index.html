@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:,">
+<title>调研报告索引 — Tetris × Jev</title>
+<style>
+  :root {
+    --bg: #f5f4ef; --ink: #141414; --line: #d8d5cc; --red: #e63329;
+    --muted: #6f6c64; --panel: #ffffff;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Inter, -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.55;
+    padding: 0 24px 56px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  header { padding: 26px 0 16px; border-bottom: 3px solid var(--ink); }
+  header h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+  header h1 em { font-style: normal; color: var(--red); }
+  header .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  header .back { display: inline-block; margin-top: 12px; font-size: 13px; font-weight: 700; color: var(--ink); text-decoration: none; border-bottom: 2px solid var(--red); }
+  header .back:hover { color: var(--red); }
+
+  h2.group { font-size: 12px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+             margin: 30px 0 10px; padding-bottom: 6px; border-bottom: 1.5px solid var(--line); color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .card { display: block; background: var(--panel); border: 2px solid var(--ink); padding: 14px 16px 15px;
+          text-decoration: none; color: inherit; transition: transform .12s ease, box-shadow .12s ease; }
+  .card:hover { transform: translateY(-2px); box-shadow: 4px 4px 0 var(--ink); }
+  .card .tag { display: inline-block; font: 700 10px var(--mono); letter-spacing: 1px; text-transform: uppercase;
+               padding: 2px 7px; border-radius: 999px; border: 1.5px solid var(--ink); margin-bottom: 8px; }
+  .card .tag.jev { background: var(--red); border-color: var(--red); color: #fff; }
+  .card .tag.laya { background: #1a7f37; border-color: #1a7f37; color: #fff; }
+  .card .tag.method { background: var(--ink); color: #fff; }
+  .card .tag.plan { background: #f0eee7; }
+  .card h3 { font-size: 15px; font-weight: 800; line-height: 1.35; }
+  .card p { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .card .meta { font: 11px var(--mono); color: var(--muted); margin-top: 9px; }
+
+  footer { margin-top: 36px; padding-top: 12px; border-top: 1.5px solid var(--line); color: var(--muted); font-size: 12px; }
+  footer code { font-family: var(--mono); font-size: 11.5px; background: #f0eee7; padding: 1px 5px; border-radius: 3px; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>调研报告 <em>·</em> 索引</h1>
+  <div class="sub">Tetris × Jev 项目的过程文档：Jev 集成与表现、Laya 本地模型的诊断与部署、方法论与路线图。</div>
+  <a class="back" href="../index.html">← 回到游戏</a>
+</header>
+
+<h2 class="group">起步 · Jev 集成</h2>
+<div class="grid">
+  <a class="card" href="jev-development-guide.html">
+    <span class="tag jev">Jev</span>
+    <h3>让 AI 自己玩游戏：Jev 集成开发实战指南</h3>
+    <p>以俄罗斯方块为例，从 Choice / Score 协议到「代码枚举 + 模型判断」范式的完整落地过程。</p>
+    <div class="meta">开发指南 · 62 KB</div>
+  </a>
+</div>
+
+<h2 class="group">Jev 表现 · 实证</h2>
+<div class="grid">
+  <a class="card" href="jev-in-action-seed42.html">
+    <span class="tag jev">回放</span>
+    <h3>Jev 对局回放 — seed 42</h3>
+    <p>98 块 / 24 行的逐块决策记录：候选落点、概率分布、与启发式的分歧点，可交互回放。</p>
+    <div class="meta">实战回放 · 1.7 MB</div>
+  </a>
+  <a class="card" href="jev-in-the-wild-panorama.html">
+    <span class="tag jev">全景</span>
+    <h3>Jev 在野 · 生态全景解读</h3>
+    <p>2,170 个公开项目的量化拆解：谁在用 Jev、用来做什么、哪些用法被验证有效。</p>
+    <div class="meta">生态研究 · 104 KB</div>
+  </a>
+  <a class="card" href="https://github.com/wang-junjian/tetris-jev/blob/main/docs/jev-v2-failure-patterns.md">
+    <span class="tag jev">诊断</span>
+    <h3>Jev v2 失误模式清单</h3>
+    <p>555 条决策的失误归类：井道误判、表面崩坏、过早填洞，以及每一项的频次证据。</p>
+    <div class="meta">Markdown · 4 KB</div>
+  </a>
+</div>
+
+<h2 class="group">Laya · 本地开源对标</h2>
+<div class="grid">
+  <a class="card" href="laya-why-weak.html">
+    <span class="tag laya">诊断</span>
+    <h3>Laya 棋力根因诊断</h3>
+    <p>为什么基座模型只得几百分：三组受控实验如何排除接口问题，定位到任务语义先验缺失。</p>
+    <div class="meta">根因分析 · 33 KB</div>
+  </a>
+  <a class="card" href="laya-best-practices.html">
+    <span class="tag laya">实践</span>
+    <h3>Laya 本地部署与集成最佳实践</h3>
+    <p>从 ModelScope 镜像拉权重到协议适配：5 个必须对齐的字段与 2 个会静默失效的坑。</p>
+    <div class="meta">部署实践 · 63 KB</div>
+  </a>
+  <a class="card" href="laya-in-action.html">
+    <span class="tag laya">实战</span>
+    <h3>Laya 能用来做什么</h3>
+    <p>从安装到跑通第一个可用场景：能力边界、token 预算、以及它真正擅长的任务形态。</p>
+    <div class="meta">实战记录 · 72 KB</div>
+  </a>
+</div>
+
+<h2 class="group">方法论 · 规划</h2>
+<div class="grid">
+  <a class="card" href="https://github.com/wang-junjian/tetris-jev/blob/main/docs/adr/0001-jev-driven-no-code-evaluation.md">
+    <span class="tag method">ADR 0001</span>
+    <h3>决策路径禁止代码估值</h3>
+    <p>为什么启发式分数永不进入 Jev 的决策路径——项目要验证的是判断来源，不是最高分。</p>
+    <div class="meta">架构决策</div>
+  </a>
+  <a class="card" href="https://github.com/wang-junjian/tetris-jev/blob/main/docs/roadmap.md">
+    <span class="tag plan">路线图</span>
+    <h3>Jev 棋力改进路线图</h3>
+    <p>各步实验的假设、验证结论与取舍：哪些做成了开关，哪些被证伪后退回。</p>
+    <div class="meta">Markdown · 5 KB</div>
+  </a>
+</div>
+
+<footer>
+  全部文档为单文件 HTML（离线可读，除本索引外无外部资源引用）。
+  源码与评估脚本见 <a href="https://github.com/wang-junjian/tetris-jev">github.com/wang-junjian/tetris-jev</a>；
+  跑通 <code>node jev-proxy.mjs 8787</code> 即可在本地复现所有实验。
+</footer>
+
+</div>
+</body>
+</html>
